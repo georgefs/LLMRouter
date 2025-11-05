@@ -10,3 +10,39 @@ howto
 from LLMRouter import datasets
 dataset = datasets.load_dataset(["gsm8k"], ["mistralai/Mixtral-8x7B-Instruct-v0.1" ,"gpt-4-1106-preview"], ["similar"])
 ```
+
+dataset example
+```
+[
+	{
+	  "question": "Janet\u2019s ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes muffins for her friends every day with four. She sells the remainder at the farmers' market daily for $2 per fresh duck egg. How much in dollars does she make every day at the farmers' market?",
+	  "answer": "Janet sells 16 - 3 - 4 = <<16-3-4=9>>9 duck eggs a day.\nShe makes 9 * 2 = $<<9*2=18>>18 every day at the farmer\u2019s market.\n#### 18",
+	  "mistralai/Mixtral-8x7B-Instruct-v0.1_response": {
+	    "text": " Janet starts with 16 eggs per day.\nShe eats 3 for breakfast, so she has 16 - 3 = 13 eggs left.\nShe uses 4 for baking, so she has 13 - 4 = 9 eggs left.\nShe sells these 9 eggs at the farmers' market for 9 * $2 = $<<9*2=18>>18.\n#### 18",
+	    "usage": {
+	      "input_tokens": 63,
+	      "output_tokens": 55,
+	      "total_tokens": 118
+	    },
+	    "response_time": 2.7230769410621423
+	  },
+	  "mistralai/Mixtral-8x7B-Instruct-v0.1_similar_eval": {
+	    "point": 0.9423452315047672
+	  },
+	  "gpt-4-1106-preview_response": {
+	    "text": "Janet uses 3 eggs for breakfast and 4 for baking muffins, which totals 3 + 4 = 7 eggs used daily.\nShe lays 16 eggs per day, so the remainder that she sells is 16 - 7 = 9 eggs.\nShe sells each egg for $2, so she makes 9 * $2 = $18 every day at the farmers' market.",
+	    "usage": {
+	      "input_tokens": 63,
+	      "output_tokens": 55,
+	      "total_tokens": 118
+	    },
+	    "response_time": 2.7230769410621423
+	  },
+	  "gpt-4-1106-preview_similar_eval": {
+	    "point": 0.9412938011049126
+	  },
+	  "key": "gsm8k_0"
+	}
+	...
+]
+```
