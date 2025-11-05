@@ -1,0 +1,12 @@
+dataset
+---
+dataset 的路徑基本上會這樣定, 根據 dataset, model, eval_method 來區分不同的檔案路徑和檔案
+需要的時候再組起來用
+原則上的 result 就是 list(dict), 之後會再補一層 cache database, 但原則上回傳格式基本上就是根據你需要的 datasets, models, eval_methods 來去組成需要的資料
+
+howto
+---
+```python
+from LLMRouter import datasets
+dataset = datasets.load_dataset(["gsm8k"], ["mistralai/Mixtral-8x7B-Instruct-v0.1" ,"gpt-4-1106-preview"], ["similar"])
+```
