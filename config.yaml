@@ -1,0 +1,13 @@
+model_list:
+  - model_name: openai/gpt-oss-20b
+    litellm_params:
+      model: openrouter/openai/gpt-oss-20b:free
+      api_base: !ENV ${OPENROUTER_API_BASEURL}
+      api_key: !ENV ${OPENROUTER_API_KEY}
+  - model_name: google
+    litellm_params:
+      model: openrouter/google/gemma-3n-e2b-it:free
+      api_base: !ENV ${OPENROUTER_API_BASEURL}
+      api_key: !ENV ${OPENROUTER_API_KEY}
+
+

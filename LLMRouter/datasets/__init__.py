@@ -4,7 +4,14 @@ import os
 from openai import OpenAI
 from datetime import datetime
 import time
+from litellm import Router
+from pyaml_env import parse_config
+#from evals import similar_eval
+
 base_path = os.path.dirname(os.path.abspath(__file__))
+
+model_list = parse_config(os.environ['LLMROUTER_CONFIG'])['model_list']
+litellm_router = Router(model_list=model_list)
 
 
 def real_path(path):
@@ -23,9 +30,9 @@ def load_file(path):
             yield key, data
 
 
-model_mapping = {
-    "openai/gpt-oss-20b": ["openai/gpt-oss-20b:free"],
-}
+def add_model_response_eval(dataset, model, eval_method):
+    pass
+
 
 
 def add_model_response(dataset, model):
@@ -35,52 +42,43 @@ def add_model_response(dataset, model):
     qa_dataset = load_file(dataset_path)
     response_dataset = dict([v for v in load_file(response_path)])
 
-    # default use openrouter
-    base_url = os.environ.get('OPENAI_API_BASEURL')
-    api_key = os.environ.get('OPENAI_API_KEY')
-
-    client = OpenAI(
-      base_url=base_url,
-      api_key=api_key,
-    )
-    target_model = model_mapping[model][0]
-
     response_tmp_path = response_path + ".tmp"
-    with open(real_path(response_tmp_path), "w+") as response_f:
-        for key, data in qa_dataset:
-            print(key)
-            if key in response_dataset:
-                response_data = response_dataset[key]
-                response_data['key'] = key
-            else:
-                messages=[
-                      {
-                          "role": "user",
-                          "content": data['question']
-                          }
-                      ]
-                st = datetime.now()
-                completion = client.chat.completions.create(
-                  extra_body={},
-                  model=target_model,
-                  messages=messages
-                )
-                ed = datetime.now()
-                dt = (ed - st).total_seconds()
-                response_data = {
-                    "key": key,
-                    "text": completion.choices[0].message.content,
-                    "usage": {
-                        "input_tokens": completion.usage.prompt_tokens, 
-                        "output_tokens": completion.usage.completion_tokens,
-                        "total_tokens": completion.usage.total_tokens
-                    },
-                    "response_time": dt
-                }
-                print(response_data)
-                response_dataset[key] = response_data
+    try:
+        with open(real_path(response_tmp_path), "w+") as response_f:
+            for key, data in qa_dataset:
+                print(key)
+                if key in response_dataset:
+                    response_data = response_dataset[key]
+                    response_data['key'] = key
+                else:
+                    messages=[
+                          {
+                              "role": "user",
+                              "content": data['question']
+                              }
+                          ]
+                    st = datetime.now()
+                    completion = litellm_router.completion(model=model, messages=messages)
 
-            response_f.write(json.dumps(response_data)+"\n")
+                    ed = datetime.now()
+                    dt = (ed - st).total_seconds()
+                    response_data = {
+                        "key": key,
+                        "text": completion.choices[0].message.content,
+                        "usage": {
+                            "input_tokens": completion.usage.prompt_tokens, 
+                            "output_tokens": completion.usage.completion_tokens,
+                            "total_tokens": completion.usage.total_tokens
+                        },
+                        "response_time": dt
+                    }
+                    print(response_data)
+                    print(completion)
+                    response_dataset[key] = response_data
+
+                response_f.write(json.dumps(response_data)+"\n")
+    except:
+        pass
 
     os.replace(real_path(response_tmp_path), real_path(response_path))
 
