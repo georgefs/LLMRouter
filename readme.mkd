@@ -62,3 +62,21 @@ output
 {"key": "gsm8k_42", "text": "Grandma Jones had a total of\n\n\\[\n5 \\text{ pies} \\times 8 \\text{ pieces per pie}=40 \\text{ pieces}\n\\]\n\nAt the end, 14 pieces were still on the buffet.  \nSo the number of pieces that the guests took was\n\n\\[\n40-14=26.\n\\]\n\n\\[\n\\boxed{26}\n\\]", "usage": {"input_tokens": 146, "output_tokens": 286, "total_tokens": 432}, "response_time": 19.547926}
 {"key": "gsm8k_43", "text": "Given:\n\n- **Calories per serving**: 250\u202fcal  \n- **Total bag weight**: 300\u202fg  \n- **Servings per bag**: 5  \n\n**Step 1 \u2013 Find the weight of one serving**\n\n\\[\n\\text{Weight per serving} = \\frac{300\\text{\u202fg}}{5} = 60\\text{\u202fg}\n\\]\n\n**Step 2 \u2013 Calculate how many calories you still have left**\n\n\\[\n\\text{Daily calorie target} = 2000\\text{\u202fcal} \\\\\n\\text{Calories already eaten} = 1800\\text{\u202fcal} \\\\\n\\text{Calories remaining} = 2000 - 1800 = 200\\text{\u202fcal}\n\\]\n\n**Step 3 \u2013 Convert remaining calories to grams of chips**\n\nWe know 250\u202fcal correspond to 60\u202fg, so the calorie density is:\n\n\\[\n\\frac{250\\text{\u202fcal}}{60\\text{\u202fg}} \\approx 4.167\\text{\u202fcal/g}\n\\]\n\nThe grams you can eat for 200\u202fcal:\n\n\\[\n\\frac{200\\text{\u202fcal}}{4.167\\text{\u202fcal/g}} \\approx 48\\text{\u202fg}\n\\]\n\n*(Alternatively: \\(200\\text{\u202fcal} \\times \\frac{60\\text{\u202fg}}{250\\text{\u202fcal}} = 0.8 \\times 60\\text{\u202fg} = 48\\text{\u202fg}\\).)*\n\n---\n\n**Answer:** You can eat **about 48\u202fgrams** of chips if you want to stay within a 2000\u2011calorie target and you've already consumed 1800\u202fcal.", "usage": {"input_tokens": 120, "output_tokens": 665, "total_tokens": 785}, "response_time": 4.637798}
 ```
+
+
+### add model eval dataset
+```
+datasets.add_model_response_eval("gsm8k", "openai/gpt-oss-20b", "random")
+```
+
+output
+```
+...
+{"key": "gsm8k_1309", "point": 0.9217994759244732}
+{"key": "gsm8k_1310", "point": 0.8030869844685591}
+{"key": "gsm8k_1311", "point": 0.4671383662536901}
+{"key": "gsm8k_1312", "point": 0.4467762747234181}
+{"key": "gsm8k_1313", "point": 0.5550580575282046}
+{"key": "gsm8k_1314", "point": 0.12985304903165873}
+...
+```

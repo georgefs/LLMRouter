@@ -6,6 +6,7 @@ from datetime import datetime
 import time
 from litellm import Router
 from pyaml_env import parse_config
+from datasets import evals
 #from evals import similar_eval
 
 base_path = os.path.dirname(os.path.abspath(__file__))
@@ -14,8 +15,15 @@ model_list = parse_config(os.environ['LLMROUTER_CONFIG'])['model_list']
 litellm_router = Router(model_list=model_list)
 
 
-def real_path(path):
+def real_path(path, create_folder=True):
     path = os.path.join(base_path, path)
+
+    if not os.path.exists(os.path.dirname(path)):
+        try:
+            os.makedirs(os.path.dirname(path))
+        except OSError as exc: # Guard against race condition
+            if exc.errno != errno.EEXIST:
+                raise exc
     return path
 
 
@@ -31,8 +39,20 @@ def load_file(path):
 
 
 def add_model_response_eval(dataset, model, eval_method):
-    pass
+    dataset_path = f"datasets/{dataset}.jsonl"
+    model_filename = urllib.parse.quote_plus(model)
+    response_path = f"responses/{dataset}/{model_filename}.jsonl"
+    qa_dataset = load_file(dataset_path)
+    response_dataset = dict([v for v in load_file(response_path)])
+    eval_path = f"evals/{dataset}/{eval_method}/{model_filename}.jsonl"
 
+    with open(real_path(eval_path), "w+") as eval_file:
+        for key, data in qa_dataset:
+            response = response_dataset[key]
+            point = getattr(evals, eval_method).eval(data, response)
+            data = {"key": key, "point": point}
+            print(data)
+            eval_file.write(json.dumps(data)+"\n")
 
 
 def add_model_response(dataset, model):
