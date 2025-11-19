@@ -6,6 +6,15 @@ dataset 的路徑基本上會這樣定, 根據 dataset, model, eval_method 來�
 
 howto
 ---
+### config env
+```
+export OPENROUTER_API_BASEURL=
+export OPENROUTER_API_KEY=
+export NCHC_API_BASEURL=
+export NCHC_API_KEY=
+export LLMROUTER_CONFIG=/path/RouterLLm/config.yaml
+```
+
 
 ### read dataset
 ```python

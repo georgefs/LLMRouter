@@ -6,17 +6,21 @@ from datetime import datetime
 import time
 from litellm import Router
 from pyaml_env import parse_config
-from datasets import evals
+from . import evals
 #from evals import similar_eval
+
+
+config = parse_config(os.environ['LLMROUTER_CONFIG'])
+model_list = config['model_list']
+dataset_path = config['dataset_path']
 
 base_path = os.path.dirname(os.path.abspath(__file__))
 
-model_list = parse_config(os.environ['LLMROUTER_CONFIG'])['model_list']
 litellm_router = Router(model_list=model_list)
 
 
 def real_path(path, create_folder=True):
-    path = os.path.join(base_path, path)
+    path = os.path.join(dataset_path, path)
 
     if not os.path.exists(os.path.dirname(path)):
         try:
@@ -90,14 +94,16 @@ def add_model_response(dataset, model):
                             "output_tokens": completion.usage.completion_tokens,
                             "total_tokens": completion.usage.total_tokens
                         },
-                        "response_time": dt
+                        "response_time": dt,
+                        "response": completion.json(),
                     }
                     print(response_data)
                     print(completion)
                     response_dataset[key] = response_data
 
                 response_f.write(json.dumps(response_data)+"\n")
-    except:
+    except Exception as e:
+        print(e)
         pass
 
     os.replace(real_path(response_tmp_path), real_path(response_path))
@@ -117,6 +123,7 @@ def load_dataset(datasets, models, eval_methods):
             model_response_path = f"responses/{dataset}/{model_filename}.jsonl"
             responses_data = load_file(model_response_path)
             for key, response in responses_data:
+                del response['response']
                 result[key][f'{model}_response'] = response
 
 
