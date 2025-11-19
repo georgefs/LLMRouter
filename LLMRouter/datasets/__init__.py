@@ -123,7 +123,8 @@ def load_dataset(datasets, models, eval_methods):
             model_response_path = f"responses/{dataset}/{model_filename}.jsonl"
             responses_data = load_file(model_response_path)
             for key, response in responses_data:
-                del response['response']
+                if 'response' in response:
+                    response.pop('response')
                 result[key][f'{model}_response'] = response
 
 
