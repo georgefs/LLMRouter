@@ -1,9 +1,9 @@
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from functools import cache
 
 @cache
 def get_model():
+    from sentence_transformers import SentenceTransformer
     model = SentenceTransformer("mixedbread-ai/mxbai-embed-large-v1")
     return model
 
@@ -19,7 +19,7 @@ def cosine_similarity(vec1, vec2):
     return dot_product / (norm1 * norm2)
 
 def eval(dataset, response):
-    standard_emb = get_embedding(dataset['answer'])
-    inference_emb = get_embedding(response['text'])
+    ground_truth = get_embedding(dataset['answer'].split('####')[-1].strip())
+    model_response = get_embedding(response['text'])
     
-    return float(cosine_similarity(standard_emb, inference_emb))
+    return float(cosine_similarity(ground_truth, model_response))
