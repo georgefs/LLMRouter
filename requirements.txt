@@ -1,4 +1,13 @@
 openai==1.106.1
 pyaml_env
 litellm[proxy]
+sentence-transformers
+numpy
+scikit-learn
+click
+
+# 測試相關依賴
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
 
