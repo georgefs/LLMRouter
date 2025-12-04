@@ -79,3 +79,99 @@ class TestSimilarEval:
         vec1 = np.array([1.0, 0.0, 0.0])
         vec2 = np.array([0.0, 1.0, 0.0])
         assert cosine_similarity(vec1, vec2) == pytest.approx(0.0, abs=0.01)
+
+
+@pytest.mark.unit
+class TestSquadEval:
+    """測試 SQuAD 風格評估方法"""
+
+    def test_normalize_answer(self):
+        """測試答案標準化功能"""
+        from LLMRouter.datasets.evals.squad import normalize_answer
+
+        # 測試移除標點符號
+        assert normalize_answer("Hello, World!") == "hello world"
+
+        # 測試移除冠詞
+        assert normalize_answer("The quick brown fox") == "quick brown fox"
+        assert normalize_answer("A cat and an elephant") == "cat and elephant"
+
+        # 測試標準化空白
+        assert normalize_answer("  multiple   spaces  ") == "multiple spaces"
+
+    def test_compute_exact(self):
+        """測試精確匹配計算"""
+        from LLMRouter.datasets.evals.squad import compute_exact
+
+        # 完全相同
+        assert compute_exact("42", "42") == 1
+
+        # 大小寫不同但標準化後相同
+        assert compute_exact("Hello World", "hello world") == 1
+
+        # 標點符號不同但標準化後相同
+        assert compute_exact("42!", "42") == 1
+
+        # 完全不同
+        assert compute_exact("42", "99") == 0
+
+    def test_compute_f1(self):
+        """測試 F1 分數計算"""
+        from LLMRouter.datasets.evals.squad import compute_f1
+
+        # 完全相同
+        f1 = compute_f1("the quick brown fox", "the quick brown fox")
+        assert f1 == pytest.approx(1.0)
+
+        # 部分重疊
+        f1 = compute_f1("the quick brown fox", "quick brown dog")
+        assert 0.0 < f1 < 1.0
+
+        # 完全不同
+        f1 = compute_f1("cat", "dog")
+        assert f1 == 0.0
+
+        # 空答案
+        assert compute_f1("", "") == 1
+        assert compute_f1("test", "") == 0
+
+    def test_eval_with_gsm8k_format(self):
+        """測試處理 GSM8K 格式答案"""
+        from LLMRouter.datasets.evals.squad import eval
+
+        # GSM8K 格式：答案在 #### 之後
+        dataset = {"answer": "The calculation shows...\n#### 42"}
+        response = {"text": "42"}
+
+        score = eval(dataset, response)
+        assert isinstance(score, float)
+        assert score > 0.5  # 應該有高分
+
+    def test_eval_exact_match(self):
+        """測試精確匹配評估函數"""
+        from LLMRouter.datasets.evals.squad import eval_exact
+
+        dataset = {"answer": "#### 42"}
+        response = {"text": "42"}
+
+        score = eval_exact(dataset, response)
+        assert score == 1
+
+        response = {"text": "99"}
+        score = eval_exact(dataset, response)
+        assert score == 0
+
+    def test_eval_both(self):
+        """測試同時返回兩種分數"""
+        from LLMRouter.datasets.evals.squad import eval_both
+
+        dataset = {"answer": "The answer is 42.\n#### 42"}
+        response = {"text": "42"}
+
+        result = eval_both(dataset, response)
+
+        assert isinstance(result, dict)
+        assert 'f1' in result
+        assert 'exact' in result
+        assert 0.0 <= result['f1'] <= 1.0
+        assert result['exact'] in [0, 1]

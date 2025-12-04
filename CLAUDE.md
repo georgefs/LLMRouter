@@ -24,6 +24,8 @@ export LLMROUTER_CONFIG=/home/george/work/delta/routebench2/config.yaml
 
 ### 安裝依賴
 
+#### 方法 1: 本地安裝
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -32,6 +34,56 @@ pip install -r requirements.txt
 - `litellm[proxy]` - 用於路由和管理多個 LLM API
 - `openai==1.106.1` - OpenAI API 客戶端
 - `pyaml_env` - 支援環境變數的 YAML 解析
+
+#### 方法 2: 使用 Docker (推薦)
+
+**建立映像:**
+```bash
+docker build -t llmrouter .
+```
+
+**使用 Docker Compose (推薦):**
+```bash
+# 1. 複製環境變數範本並填入實際值
+cp .env.example .env
+# 編輯 .env 檔案，填入 API keys
+
+# 2. 啟動容器
+docker-compose up -d
+
+# 3. 進入容器
+docker-compose exec llmrouter bash
+
+# 4. 在容器內執行命令
+./cli/add_model_response.py --dataset gsm8k --model "gpt-oss-20b"
+
+# 5. 停止容器
+docker-compose down
+```
+
+**直接使用 Docker:**
+```bash
+# 執行測試
+docker run --rm \
+  -v $(pwd)/datasets:/app/datasets \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -e OPENROUTER_API_KEY=your-key \
+  -e NCHC_API_KEY=your-key \
+  llmrouter pytest tests/
+
+# 互動式 shell
+docker run -it --rm \
+  -v $(pwd)/datasets:/app/datasets \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  -e OPENROUTER_API_KEY=your-key \
+  -e NCHC_API_KEY=your-key \
+  llmrouter /bin/bash
+```
+
+**執行測試服務:**
+```bash
+docker-compose --profile test up test
+```
 
 ## 核心架構
 
@@ -63,11 +115,27 @@ model_list:
 
 ### 評估方法
 
-位於 `LLMRouter/datasets/evals/`:
-- `similar.py` - 使用 sentence transformers (mxbai-embed-large-v1) 計算答案與 ground truth 的 cosine similarity
-- `random.py` - 隨機評分(用於測試)
+位於 `LLMRouter/datasets/evals/`，所有評估模組必須實作 `eval(dataset, response)` 函數：
 
-每個評估模組必須實作 `eval(dataset, response)` 函數。
+- **`similar.py`** - 語義相似度評估
+  - 使用 sentence transformers (mxbai-embed-large-v1)
+  - 計算答案與 ground truth 的 cosine similarity
+  - 適合：開放式問答、需要語義理解的任務
+
+- **`squad.py`** - SQuAD 風格評估 (新增)
+  - 基於 SQuAD 2.0 官方評估腳本
+  - 提供三種評估函數:
+    - `eval()` - F1 分數 (預設)
+    - `eval_exact()` - 精確匹配分數
+    - `eval_both()` - 同時返回 F1 和精確匹配
+  - 特色：
+    - 標準化答案（移除標點、冠詞、空白）
+    - 基於 token overlap 計算 F1
+    - 支援 GSM8K 格式 (#### 分隔符)
+  - 適合：事實性問答、有明確答案的任務
+
+- **`random.py`** - 隨機評分
+  - 用於測試和基準比較
 
 ## 常用命令
 
@@ -199,20 +267,30 @@ pytest -v -s
 tests/
 ├── conftest.py          # 共用 fixtures 和測試設定
 ├── test_datasets.py     # 資料集核心功能測試 (5 個測試)
-└── test_evals.py        # 評估方法核心功能測試 (4 個測試)
+└── test_evals.py        # 評估方法核心功能測試 (10 個測試)
 ```
 
 ### 測試涵蓋的核心功能
 
-**test_datasets.py** - 資料集主要 API:
+**test_datasets.py** - 資料集主要 API (5 個測試):
 - `load_dataset()` - 載入完整資料集（含單/多模型）
 - `add_model_response()` - 生成模型回應
 - `add_model_response_eval()` - 生成評估結果
 
-**test_evals.py** - 評估方法:
-- `random.eval()` - 隨機評估
-- `similar.eval()` - 相似度評估
-- `cosine_similarity()` - 向量相似度計算
+**test_evals.py** - 評估方法 (10 個測試):
+- **Random** (1 個測試):
+  - `random.eval()` - 隨機評估
+- **Similar** (3 個測試):
+  - `similar.eval()` - 相似度評估
+  - 答案擷取邏輯
+  - `cosine_similarity()` - 向量相似度計算
+- **SQuAD** (6 個測試):
+  - `normalize_answer()` - 答案標準化
+  - `compute_exact()` - 精確匹配
+  - `compute_f1()` - F1 分數
+  - `eval()` - F1 評估
+  - `eval_exact()` - 精確匹配評估
+  - `eval_both()` - 雙重評估
 
 ### 測試哲學
 

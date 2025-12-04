@@ -28,7 +28,7 @@ tests/
 ├── __init__.py          # Package 初始化
 ├── conftest.py          # Pytest fixtures 和共用設定
 ├── test_datasets.py     # 資料集核心功能測試 (5 個測試)
-├── test_evals.py        # 評估方法核心功能測試 (4 個測試)
+├── test_evals.py        # 評估方法核心功能測試 (10 個測試)
 └── README.md           # 本檔案
 ```
 
@@ -49,7 +49,7 @@ tests/
 3. **TestAddModelResponseEval** (1 個測試)
    - 生成評估結果
 
-### test_evals.py - 評估方法核心功能 (4 個測試)
+### test_evals.py - 評估方法核心功能 (10 個測試)
 
 1. **TestRandomEval** (1 個測試)
    - 隨機評估回傳有效分數
@@ -58,6 +58,14 @@ tests/
    - 相似度評估回傳有效分數
    - 正確擷取 #### 後的答案
    - cosine similarity 基本功能
+
+3. **TestSquadEval** (6 個測試)
+   - 答案標準化功能（移除標點、冠詞、空白）
+   - 精確匹配計算
+   - F1 分數計算
+   - 處理 GSM8K 格式答案
+   - 精確匹配評估函數
+   - 同時返回兩種分數
 
 ## 撰寫測試
 
