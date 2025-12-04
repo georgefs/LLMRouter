@@ -1,0 +1,59 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# 虛擬環境
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 測試和覆蓋率
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# 環境變數檔案（敏感資訊）
+.env
+.envrc
+env.sample
+
+# 資料集（應該用 volume 掛載）
+datasets/
+
+# 文檔（可選，如果要保留在映像中則移除這行）
+*.md
+!CLAUDE.md
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# 其他
+*.log
+*.tmp
+.DS_Store

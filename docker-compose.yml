@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  llmrouter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llmrouter
+
+    # 環境變數（請在 .env 檔案中設定實際值）
+    environment:
+      - OPENROUTER_API_BASEURL=${OPENROUTER_API_BASEURL}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - NCHC_API_BASEURL=${NCHC_API_BASEURL}
+      - NCHC_API_KEY=${NCHC_API_KEY}
+      - LLMROUTER_CONFIG=/app/config.yaml
+
+    # 掛載資料集目錄
+    volumes:
+      - ./datasets:/app/datasets
+      - ./config.yaml:/app/config.yaml:ro
+      # 開發時可以掛載整個專案目錄（可選）
+      # - .:/app
+
+    # 保持容器運行
+    stdin_open: true
+    tty: true
+
+    # 預設啟動命令
+    command: /bin/bash
+
+    # 資源限制（可選）
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 4G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 2G
+
+  # 測試服務（可選）
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llmrouter-test
+    environment:
+      - LLMROUTER_CONFIG=/app/config.yaml
+    volumes:
+      - .:/app
+    command: pytest tests/ -v
+    profiles:
+      - test
