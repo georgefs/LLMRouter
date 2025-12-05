@@ -1,12 +1,17 @@
 import urllib.parse
 import json
 import os
+import errno
+import logging
 from openai import OpenAI
 from datetime import datetime
 import time
 from litellm import Router
 from pyaml_env import parse_config
 from . import evals
+
+# Configure logger
+logger = logging.getLogger(__name__)
 #from evals import similar_eval
 
 
@@ -103,9 +108,14 @@ def add_model_response(dataset, model):
 
                 response_f.write(json.dumps(response_data)+"\n")
     except Exception as e:
-        print(e)
-        pass
+        logger.error(f"Failed to generate responses for dataset {dataset}, model {model}: {e}")
+        # Clean up temporary file if it exists
+        tmp_file = real_path(response_tmp_path)
+        if os.path.exists(tmp_file):
+            os.remove(tmp_file)
+        raise
 
+    # Only replace if we successfully completed the write
     os.replace(real_path(response_tmp_path), real_path(response_path))
 
 

@@ -37,6 +37,7 @@ def run(dataset, models, output):
     for i, model_data in enumerate(records):
         question = model_data['question']
         prompts.append(question)
+        item_key = model_data.get('key', f'item_{i}')
 
         for j, model_name in enumerate(model_names):
             # Get response data
@@ -45,7 +46,7 @@ def run(dataset, models, output):
                 tokens[i, j] = response['usage']['total_tokens']
                 times[i, j] = response['response_time']
             else:
-                print(f"Warning: Missing response for {key} from {model_name}")
+                print(f"Warning: Missing response for {item_key} from {model_name}")
                 tokens[i, j] = 0
                 times[i, j] = 0
 
