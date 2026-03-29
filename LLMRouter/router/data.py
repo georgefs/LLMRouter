@@ -18,19 +18,21 @@ class RouterData:
     train_prompt: List[str]
     val_prompt: List[str]
     test_prompt: List[str]
-    train_score: np.ndarray  # (N_train, N_models)
-    val_score: np.ndarray    # (N_val,   N_models)
-    test_score: np.ndarray   # (N_test,  N_models)
-    test_tokens: np.ndarray  # (N_test,  N_models) — 無資料時為零矩陣
-    test_time: np.ndarray    # (N_test,  N_models) — 無資料時為零矩陣
-    models: List[str]        # 模型名稱清單（長度 = N_models）
+    train_score: np.ndarray           # (N_train, N_models)
+    val_score: np.ndarray             # (N_val,   N_models)
+    test_score: np.ndarray            # (N_test,  N_models)
+    test_tokens: np.ndarray           # (N_test,  N_models) — 無資料時為零矩陣
+    test_time: np.ndarray             # (N_test,  N_models) — 無資料時為零矩陣
+    models: List[str]                 # 模型名稱清單（長度 = N_models）
+    train_embed: Optional[np.ndarray] = None  # (N_train, D) — router prepare --emb-model 時填入
+    val_embed: Optional[np.ndarray] = None    # (N_val,   D)
+    test_embed: Optional[np.ndarray] = None   # (N_test,  D)
 
     def save(self, path: str | Path) -> None:
         """儲存為 .npz 檔案。"""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            path,
+        arrays: dict = dict(
             train_prompt=np.array(self.train_prompt, dtype=object),
             val_prompt=np.array(self.val_prompt, dtype=object),
             test_prompt=np.array(self.test_prompt, dtype=object),
@@ -41,6 +43,13 @@ class RouterData:
             test_time=self.test_time,
             model=np.array(self.models, dtype=object),
         )
+        if self.train_embed is not None:
+            arrays["train_embed"] = self.train_embed
+        if self.val_embed is not None:
+            arrays["val_embed"] = self.val_embed
+        if self.test_embed is not None:
+            arrays["test_embed"] = self.test_embed
+        np.savez(path, **arrays)
 
     def subsample_train(self, size: "float | int", seed: int = 42) -> "RouterData":
         """
@@ -143,6 +152,9 @@ class RouterData:
             test_tokens=self.test_tokens,
             test_time=self.test_time,
             models=self.models,
+            train_embed=self.train_embed[idx] if self.train_embed is not None else None,
+            val_embed=self.val_embed,
+            test_embed=self.test_embed,
         )
 
     @classmethod
@@ -159,6 +171,9 @@ class RouterData:
             test_tokens=d["test_tokens"],
             test_time=d["test_time"],
             models=d["model"].tolist(),
+            train_embed=d["train_embed"] if "train_embed" in d else None,
+            val_embed=d["val_embed"] if "val_embed" in d else None,
+            test_embed=d["test_embed"] if "test_embed" in d else None,
         )
 
 
@@ -190,6 +205,8 @@ class DataPreparer:
         train_ratio: float = 0.6,
         val_ratio: float = 0.1,
         seed: int = 42,
+        emb_model: Optional[str] = None,
+        emb_batch_size: int = 32,
     ) -> RouterData:
         """
         從平坦記錄列表（DatasetManager.extract() 輸出）建立 RouterData。
@@ -247,6 +264,15 @@ class DataPreparer:
         val_frac_of_temp = val_ratio / (1.0 - train_ratio)
         val_idx, test_idx = train_test_split(temp_idx, train_size=val_frac_of_temp, random_state=seed)
 
+        train_embed = val_embed = test_embed = None
+        if emb_model:
+            from ._embeddings import get_embeddings
+            print(f"[DataPreparer] 計算嵌入（model={emb_model}，共 {n} 筆）...")
+            all_embed = get_embeddings(prompts, emb_model, emb_batch_size)
+            train_embed = all_embed[train_idx]
+            val_embed   = all_embed[val_idx]
+            test_embed  = all_embed[test_idx]
+
         return RouterData(
             train_prompt=[prompts[i] for i in train_idx],
             val_prompt=[prompts[i] for i in val_idx],
@@ -257,6 +283,9 @@ class DataPreparer:
             test_tokens=tokens[test_idx],
             test_time=times[test_idx],
             models=models,
+            train_embed=train_embed,
+            val_embed=val_embed,
+            test_embed=test_embed,
         )
 
     def from_manager(
@@ -266,6 +295,8 @@ class DataPreparer:
         models: List[str],
         strategies: "str | List[str]",
         scorer=None,
+        emb_model: Optional[str] = None,
+        emb_batch_size: int = 32,
         **kwargs,
     ) -> RouterData:
         """
@@ -301,5 +332,7 @@ class DataPreparer:
             records,
             tokens_by_key_model=tokens_map,
             times_by_key_model=times_map,
+            emb_model=emb_model,
+            emb_batch_size=emb_batch_size,
             **kwargs,
         )

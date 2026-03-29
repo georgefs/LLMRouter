@@ -446,3 +446,7 @@ class TestRouterImports:
     def test_roberta_importable(self):
         from LLMRouter.router import RoBERTaMLCRouter
         assert RoBERTaMLCRouter is not None
+
+    def test_grpo_importable(self):
+        from LLMRouter.router import GRPORouter
+        assert GRPORouter is not None

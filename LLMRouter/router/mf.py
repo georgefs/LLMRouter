@@ -34,8 +34,8 @@ class MFRouter(BaseRouter):
         batch_size: int = 32,
         lr: float = 0.001,
         dropout: float = 0.1,
-        emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-        emb_batch_size: int = 32,
+        emb_model: str = "mixedbread-ai/mxbai-embed-large-v1",
+        emb_batch_size: int = 16,
         seed: int = 42,
     ) -> None:
         self.latent_dim = latent_dim
@@ -87,8 +87,12 @@ class MFRouter(BaseRouter):
         self._device = device
         print(f"[MF] Device: {device}")
 
-        print(f"[MF] 計算訓練集嵌入（{len(data.train_prompt)} 筆）...")
-        X_train = get_embeddings(data.train_prompt, self.emb_model, self.emb_batch_size)
+        if data.train_embed is not None:
+            print(f"[MF] 使用預存訓練集嵌入（{len(data.train_prompt)} 筆）...")
+            X_train = data.train_embed
+        else:
+            print(f"[MF] 計算訓練集嵌入（{len(data.train_prompt)} 筆）...")
+            X_train = get_embeddings(data.train_prompt, self.emb_model, self.emb_batch_size)
 
         X_t = torch.FloatTensor(X_train).to(device)
         Y_t = torch.FloatTensor(data.train_score).to(device)
@@ -122,17 +126,24 @@ class MFRouter(BaseRouter):
         self._model = model
         print("[MF] 訓練完成。")
 
-    def predict_probs(self, prompts: List[str]) -> np.ndarray:
+    def _predict_from_embed(self, X: np.ndarray) -> np.ndarray:
         import torch
-
-        if self._model is None:
-            raise RuntimeError("請先呼叫 fit()")
-
-        print(f"[MF] 計算嵌入（{len(prompts)} 筆）...")
-        X = get_embeddings(prompts, self.emb_model, self.emb_batch_size)
         X_t = torch.FloatTensor(X).to(self._device)
-
         self._model.eval()
         with torch.no_grad():
             scores = self._model(X_t).cpu().numpy()
         return scores.astype(np.float32)
+
+    def predict_probs(self, prompts: List[str]) -> np.ndarray:
+        if self._model is None:
+            raise RuntimeError("請先呼叫 fit()")
+        print(f"[MF] 計算嵌入（{len(prompts)} 筆）...")
+        X = get_embeddings(prompts, self.emb_model, self.emb_batch_size)
+        return self._predict_from_embed(X)
+
+    def _predict_for_eval(self, data: RouterData) -> np.ndarray:
+        if self._model is None:
+            raise RuntimeError("請先呼叫 fit()")
+        if data.test_embed is not None:
+            return self._predict_from_embed(data.test_embed)
+        return self.predict_probs(data.test_prompt)

@@ -24,8 +24,8 @@ class KNNRouter(BaseRouter):
     def __init__(
         self,
         k: int = 10,
-        emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-        emb_batch_size: int = 32,
+        emb_model: str = "mixedbread-ai/mxbai-embed-large-v1",
+        emb_batch_size: int = 16,
     ) -> None:
         self.k = k
         self.emb_model = emb_model
@@ -37,8 +37,12 @@ class KNNRouter(BaseRouter):
     def _fit(self, data: RouterData) -> None:
         from sklearn.neighbors import NearestNeighbors
 
-        print(f"[KNN] 計算訓練集嵌入（{len(data.train_prompt)} 筆）...")
-        self._X_train = get_embeddings(data.train_prompt, self.emb_model, self.emb_batch_size)
+        if data.train_embed is not None:
+            print(f"[KNN] 使用預存訓練集嵌入（{len(data.train_prompt)} 筆）...")
+            self._X_train = data.train_embed
+        else:
+            print(f"[KNN] 計算訓練集嵌入（{len(data.train_prompt)} 筆）...")
+            self._X_train = get_embeddings(data.train_prompt, self.emb_model, self.emb_batch_size)
         self._Y_train = data.train_score.astype(np.float32)
 
         k = min(self.k, len(data.train_prompt))
@@ -46,15 +50,23 @@ class KNNRouter(BaseRouter):
         self._nn.fit(self._X_train)
         print(f"[KNN] 訓練完成（k={k}）。")
 
-    def predict_probs(self, prompts: List[str]) -> np.ndarray:
-        if self._nn is None:
-            raise RuntimeError("請先呼叫 fit()")
-
-        print(f"[KNN] 計算測試集嵌入（{len(prompts)} 筆）...")
-        X_test = get_embeddings(prompts, self.emb_model, self.emb_batch_size)
+    def _predict_from_embed(self, X_test: np.ndarray) -> np.ndarray:
         _, indices = self._nn.kneighbors(X_test)
-
-        predicted = np.zeros((len(prompts), self._Y_train.shape[1]), dtype=np.float32)
+        predicted = np.zeros((len(X_test), self._Y_train.shape[1]), dtype=np.float32)
         for i, nbr_idx in enumerate(indices):
             predicted[i] = np.mean(self._Y_train[nbr_idx], axis=0)
         return predicted
+
+    def predict_probs(self, prompts: List[str]) -> np.ndarray:
+        if self._nn is None:
+            raise RuntimeError("請先呼叫 fit()")
+        print(f"[KNN] 計算測試集嵌入（{len(prompts)} 筆）...")
+        X_test = get_embeddings(prompts, self.emb_model, self.emb_batch_size)
+        return self._predict_from_embed(X_test)
+
+    def _predict_for_eval(self, data: RouterData) -> np.ndarray:
+        if self._nn is None:
+            raise RuntimeError("請先呼叫 fit()")
+        if data.test_embed is not None:
+            return self._predict_from_embed(data.test_embed)
+        return self.predict_probs(data.test_prompt)

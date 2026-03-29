@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -147,16 +148,20 @@ def cmd_router_prepare(mgr: DatasetManager, args: argparse.Namespace) -> None:
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
         seed=args.seed,
+        emb_model=args.emb_model,
+        emb_batch_size=args.emb_batch_size,
     )
     data = _preprocess_data(data, args)
 
     out = Path(args.output)
     data.save(out)
+    embed_info = f"  embedding: {args.emb_model}" if args.emb_model else "  embedding: 無（router fit 時即時計算）"
     print(
         f"已儲存 RouterData → {out}\n"
         f"  strategy: {strategies}\n"
         f"  模型: {data.models}\n"
-        f"  train={len(data.train_prompt)}, val={len(data.val_prompt)}, test={len(data.test_prompt)}"
+        f"  train={len(data.train_prompt)}, val={len(data.val_prompt)}, test={len(data.test_prompt)}\n"
+        f"{embed_info}"
     )
 
 
@@ -189,8 +194,8 @@ def _add_preprocess_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--dedup-emb-model",
         dest="dedup_emb_model",
-        default="sentence-transformers/all-MiniLM-L6-v2",
-        help="去重用的嵌入模型（預設 all-MiniLM-L6-v2）",
+        default="mixedbread-ai/mxbai-embed-large-v1",
+        help="去重用的嵌入模型（預設 mixedbread-ai/mxbai-embed-large-v1）",
     )
 
 
@@ -366,7 +371,7 @@ def _add_router_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--emb-model",
         dest="emb_model",
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default="mixedbread-ai/mxbai-embed-large-v1",
         help="KNN / MF / SW: 嵌入模型名稱",
     )
     p.add_argument("--roberta-model", dest="roberta_model", default="roberta-base", help="RoBERTa: 模型名稱")
@@ -470,6 +475,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_rt_prep.add_argument("--train-ratio", dest="train_ratio", type=float, default=0.6, help="訓練集比例（預設 0.6）")
     p_rt_prep.add_argument("--val-ratio", dest="val_ratio", type=float, default=0.1, help="驗證集比例（預設 0.1）；剩餘為 test")
     p_rt_prep.add_argument("--seed", type=int, default=42, help="分割隨機種子")
+    p_rt_prep.add_argument(
+        "--emb-model",
+        dest="emb_model",
+        default=None,
+        help="預存 embedding 的模型名稱（預設不儲存）。"
+             "例：sentence-transformers/all-MiniLM-L6-v2",
+    )
+    p_rt_prep.add_argument(
+        "--emb-batch-size",
+        dest="emb_batch_size",
+        type=int,
+        default=32,
+        help="embedding 計算 batch size（預設 32）",
+    )
     _add_preprocess_args(p_rt_prep)
 
     # router train
@@ -581,7 +600,12 @@ def main() -> None:
 
     except (FileNotFoundError, FileExistsError) as e:
         print(f"錯誤: {e}", file=sys.stderr)
-        sys.exit(1)
+        os._exit(1)
+
+    # litellm.Router 會啟動非 daemon 背景 thread（health check、scheduler 等），
+    # asyncio.run() 結束後這些 thread 仍存活，導致 process 掛住。
+    # 使用 os._exit() 強制結束，避免等待背景 thread。
+    os._exit(0)
 
 
 if __name__ == "__main__":

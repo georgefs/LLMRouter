@@ -89,6 +89,18 @@ class RoBERTaMLCRouter(BaseRouter):
 
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 
+        # 過濾訓練集中超過 max_length 的樣本，避免用截斷後的噪音資料訓練
+        lengths = [
+            len(self._tokenizer(p, add_special_tokens=True)["input_ids"])
+            for p in data.train_prompt
+        ]
+        keep = [i for i, l in enumerate(lengths) if l <= 512]
+        n_removed = len(data.train_prompt) - len(keep)
+        if n_removed:
+            print(f"[RoBERTa] 過濾長度 > 512 的訓練樣本：移除 {n_removed} 筆，保留 {len(keep)} 筆")
+        train_prompts = [data.train_prompt[i] for i in keep]
+        train_scores  = data.train_score[np.array(keep)]
+
         config = AutoConfig.from_pretrained(
             self.model_name,
             num_labels=num_labels,
@@ -100,7 +112,7 @@ class RoBERTaMLCRouter(BaseRouter):
             self.model_name, config=config
         )
 
-        train_ds = self._make_dataset(data.train_prompt, data.train_score)
+        train_ds = self._make_dataset(train_prompts, train_scores)
         eval_ds = self._make_dataset(data.test_prompt, data.test_score)
 
         training_args = TrainingArguments(

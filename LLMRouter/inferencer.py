@@ -163,4 +163,14 @@ class Inferencer:
 
     def generate(self, dataset: str, model: str, overwrite: bool = False) -> List[dict]:
         """同步版本（封裝 asyncio.run）。"""
-        return asyncio.run(self.agenerate(dataset, model, overwrite=overwrite))
+        async def _run_and_cleanup() -> List[dict]:
+            result = await self.agenerate(dataset, model, overwrite=overwrite)
+            current = asyncio.current_task()
+            pending = [t for t in asyncio.all_tasks() if t is not current]
+            for t in pending:
+                t.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            return result
+
+        return asyncio.run(_run_and_cleanup())

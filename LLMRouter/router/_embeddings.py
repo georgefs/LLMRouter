@@ -12,8 +12,13 @@ _model_cache: dict = {}
 
 # ── embedding 結果 cache ──────────────────────────────────────────────────────
 # key: (model_name, id(text_list), len(text_list))
-# id(text_list) 在物件存活期間唯一；RouterBenchmark 持有 data 的 test_prompt
-# 始終存活，因此對 test 集合安全有效。training subset 每次是新物件，不會命中。
+# id(text_list) 僅在物件存活期間唯一；CPython 在 GC 後可能將同一記憶體位址
+# 分配給新的 list，若 len 也相同則 cache key 相同 → 回傳錯誤結果。
+# 因此 cache 只對「物件生命週期橫跨所有查詢」的情境安全，
+# 例如 RouterBenchmark 持有的 test_prompt（始終存活）。
+# Training subset 每次重建，不應命中此 cache — 不過因為
+# id 可能被重用，實際上可能誤命中。這裡改用 object identity（以 id）加上
+# 第一筆 + 最後一筆文字做 fingerprint，降低誤命中機率。
 _emb_cache: dict = {}
 
 
@@ -37,8 +42,8 @@ def _load_model(model_name: str):
 
 def get_embeddings(
     text_list: List[str],
-    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-    batch_size: int = 32,
+    model_name: str = "mixedbread-ai/mxbai-embed-large-v1",
+    batch_size: int = 16,
 ) -> np.ndarray:
     """
     使用 HuggingFace transformer 模型計算 mean-pool 嵌入向量。
@@ -49,7 +54,7 @@ def get_embeddings(
 
     Args:
         text_list: 待嵌入的文字列表
-        model_name: HuggingFace 模型名稱（預設 all-MiniLM-L6-v2）
+        model_name: HuggingFace 模型名稱（預設 mixedbread-ai/mxbai-embed-large-v1）
         batch_size: 每批處理的文字數量
 
     Returns:
@@ -57,7 +62,10 @@ def get_embeddings(
     """
     import torch
 
-    cache_key = (model_name, id(text_list), len(text_list))
+    n = len(text_list)
+    # fingerprint：id + len + 首尾文字，避免 CPython id 重用造成誤命中
+    fp = (text_list[0] if n > 0 else "", text_list[-1] if n > 0 else "")
+    cache_key = (model_name, id(text_list), n, fp)
     if cache_key in _emb_cache:
         return _emb_cache[cache_key]
 
@@ -70,7 +78,7 @@ def get_embeddings(
             batch,
             padding=True,
             truncation=True,
-            max_length=128,
+            max_length=8192,
             return_tensors="pt",
         ).to(device)
         with torch.no_grad():

@@ -192,6 +192,12 @@ python3 -m LLMRouter router prepare \
 # 自訂切割比例
 python3 -m LLMRouter router prepare ... --train-ratio 0.7 --val-ratio 0.1 -o data.npz
 
+# 預存 embedding（避免 router fit 時重複計算，適合多次 bench）
+python3 -m LLMRouter router prepare ... \
+  --emb-model mixedbread-ai/mxbai-embed-large-v1 \
+  --emb-batch-size 32 \
+  -o data_with_emb.npz
+
 # 準備時同步做訓練集預處理（去重 + 鑑別度篩選）
 python3 -m LLMRouter router prepare ... --min-var 0.05 --dedup-eps 0.3 -o data_clean.npz
 ```
@@ -271,7 +277,7 @@ Benchmark: knn  |  test=N  |  full_train=N  |  repeats=3
 ```
 
 - 孤立的 prompt（無法歸入任何 cluster）全部保留
-- 去重用的嵌入模型可透過 `--dedup-emb-model` 指定（預設 `all-MiniLM-L6-v2`）
+- 去重用的嵌入模型可透過 `--dedup-emb-model` 指定（預設 `mixedbread-ai/mxbai-embed-large-v1`）
 - 不指定 `--dedup-eps` 則不套用
 
 #### 使用範例
@@ -296,7 +302,9 @@ python3 -m LLMRouter router bench knn \
 | `sw` | Similarity-Weighted Ranking | `--k`, `--temperature` |
 | `roberta` | RoBERTa 多標籤迴歸 | `--roberta-model`, `--epochs` |
 
-KNN / MF / SW 共用 `--emb-model`（預設 `sentence-transformers/all-MiniLM-L6-v2`）。
+KNN / MF / SW 共用 `--emb-model`（預設 `mixedbread-ai/mxbai-embed-large-v1`）。
+
+> **GRPORouter**（強化學習，PPO-clip + Group Relative Advantage）已實作於 Python API，尚未整合進 CLI。請見 [Python API → Router — 訓練與評估](#router--訓練與評估)。
 
 ---
 
@@ -502,6 +510,15 @@ data = DataPreparer().from_manager(
     scorer=FieldScorer("cost", strategy="cost"),
 )
 
+# 預存 embedding：router fit / bench 時直接使用，省略重複計算
+data = DataPreparer().from_manager(
+    mgr, ...,
+    emb_model="mixedbread-ai/mxbai-embed-large-v1",
+    emb_batch_size=32,
+)
+# RouterData.train_embed / val_embed / test_embed 會被填入
+# KNNRouter / MFRouter / SWRankingRouter 在 fit() 和 evaluate() 時自動使用
+
 data.save("data.npz")
 data = RouterData.load("data.npz")  # 之後直接載入，不需重新準備
 ```
@@ -527,7 +544,7 @@ data = data.deduplicate_train(eps=0.3, embeddings=X_train)
 ### Router — 訓練與評估
 
 ```python
-from LLMRouter.router import KNNRouter, MFRouter, SWRankingRouter
+from LLMRouter.router import KNNRouter, MFRouter, SWRankingRouter, GRPORouter
 from LLMRouter.router import OracleRouter, RandomRouter
 
 # 訓練
@@ -544,6 +561,20 @@ metrics = router.evaluate(data)
 # 推論
 indices = router.predict(["What is photosynthesis?", "Solve x+2=5"])
 # → array([1, 0])  每個 prompt 對應的最佳模型 index
+
+# GRPORouter：強化學習版本（PPO-clip + Group Relative Advantage）
+# 尚未整合 CLI，只能透過 Python API 使用
+router = GRPORouter(
+    group_size=8,      # 每個 prompt 採樣的 routing decision 數量
+    hidden_dim=256,    # policy network 隱藏層維度
+    epochs=30,
+    lr=3e-4,
+    clip_eps=0.2,      # PPO clip ε
+    kl_coef=0.01,      # KL 正則化係數
+    entropy_coef=0.01, # entropy bonus（鼓勵探索）
+)
+router.fit(data)
+metrics = router.evaluate(data)
 ```
 
 ### Router — 訓練資料縮放實驗

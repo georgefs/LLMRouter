@@ -144,4 +144,17 @@ class AnnotationRunner:
         overwrite: bool = False,
     ) -> List[dict]:
         """同步版本（封裝 asyncio.run）。"""
-        return asyncio.run(self.arun(annotator, dataset, model, strategy, overwrite=overwrite))
+        async def _run_and_cleanup() -> List[dict]:
+            result = await self.arun(annotator, dataset, model, strategy, overwrite=overwrite)
+            # litellm 在每次 acompletion() 後用 create_task() 建立 logging 背景 task，
+            # 這些 task 未被 await。asyncio.run() 結束時會嘗試取消並等待它們，
+            # 但若它們正在等網路 I/O 則會卡住。在此主動取消並等待，讓事件迴圈乾淨退出。
+            current = asyncio.current_task()
+            pending = [t for t in asyncio.all_tasks() if t is not current]
+            for t in pending:
+                t.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            return result
+
+        return asyncio.run(_run_and_cleanup())

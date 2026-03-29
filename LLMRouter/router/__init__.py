@@ -1,5 +1,6 @@
 from .data import DataPreparer, RouterData
 from .eval import RouterBenchmark, RunResult, evaluate
+from .grpo import GRPORouter
 from .knn import KNNRouter
 from .mf import MFRouter
 from .oracle import OracleRouter, RandomRouter
@@ -18,4 +19,5 @@ __all__ = [
     "MFRouter",
     "SWRankingRouter",
     "RoBERTaMLCRouter",
+    "GRPORouter",
 ]
