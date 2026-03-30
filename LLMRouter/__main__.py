@@ -11,6 +11,12 @@ Subcommands:
   router prepare --datasets d1,d2 --models m1,m2 --strategy s --output data.npz
   router train <type> --data data.npz [--output router.pkl] [router options]
   router eval <type> --data data.npz [--model router.pkl]
+
+預處理選項（prepare / train / bench 共用）：
+  --min-var <float>                  過濾低鑑別度訓練樣本（np.var(scores) ≤ min_var）
+  --dedup-eps <float>                啟用語意去重，指定 DBSCAN eps（e.g. 0.15）
+  --dedup-emb-model <name>           去重用嵌入模型（預設 mixedbread-ai/mxbai-embed-large-v1）
+  --dedup-sample-ratio <float>       每個重複 cluster 保留比例（預設 0.3）
 """
 
 from __future__ import annotations
@@ -172,6 +178,7 @@ _ROUTER_TYPES = {
     "mf": "MFRouter",
     "sw": "SWRankingRouter",
     "roberta": "RoBERTaMLCRouter",
+    "grpo": "GRPORouter",
 }
 
 
@@ -197,6 +204,13 @@ def _add_preprocess_args(p: argparse.ArgumentParser) -> None:
         default="mixedbread-ai/mxbai-embed-large-v1",
         help="去重用的嵌入模型（預設 mixedbread-ai/mxbai-embed-large-v1）",
     )
+    p.add_argument(
+        "--dedup-sample-ratio",
+        dest="dedup_sample_ratio",
+        type=float,
+        default=0.3,
+        help="每個重複 cluster 保留的比例（預設 0.3）",
+    )
 
 
 def _preprocess_data(data, args: argparse.Namespace):
@@ -207,6 +221,7 @@ def _preprocess_data(data, args: argparse.Namespace):
         data = data.deduplicate_train(
             eps=args.dedup_eps,
             emb_model=args.dedup_emb_model,
+            cluster_sample_ratio=getattr(args, "dedup_sample_ratio", 0.3),
         )  # metric 固定 "cosine"，min_samples 固定 2（與預設一致）
     return data
 

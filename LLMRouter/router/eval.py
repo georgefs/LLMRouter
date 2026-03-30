@@ -11,16 +11,14 @@ from .data import RouterData
 # ── 核心指標函數 ───────────────────────────────────────────────────────────────
 
 
-def _softmax_entropy(probs: np.ndarray, temperature: float = 0.1) -> float:
+def _softmax_entropy(probs: np.ndarray) -> float:
     """
-    Temperature-scaled softmax entropy（bits/sample），與 RouterEval 計算方式一致。
+    Softmax entropy（bits/sample），與 RouterEval3 計算方式一致。
 
     Args:
         probs: (N, M) 分數矩陣（不必是機率）
-        temperature: Softmax 溫度
     """
-    scaled = probs / temperature
-    p = np.exp(scaled - np.max(scaled, axis=1, keepdims=True))
+    p = np.exp(probs - np.max(probs, axis=1, keepdims=True))
     p /= np.sum(p, axis=1, keepdims=True)
     with np.errstate(divide="ignore", invalid="ignore"):
         log_p = np.where(p > 1e-10, np.log2(np.where(p > 1e-10, p, 1.0)), 0.0)
@@ -31,7 +29,6 @@ def _softmax_entropy(probs: np.ndarray, temperature: float = 0.1) -> float:
 def evaluate(
     probs: np.ndarray,
     data: RouterData,
-    temperature: float = 0.1,
 ) -> dict:
     """
     純函數：給定 (N_test, N_models) 預測分數矩陣，在 RouterData.test_* 上計算評估指標。
@@ -39,9 +36,8 @@ def evaluate(
     與 router 實例無關，可單獨使用於任意預測矩陣。
 
     Args:
-        probs:       (N_test, N_models) 預測分數矩陣（argmax 為所選模型）
-        data:        RouterData（只使用 test_score / test_tokens / test_time）
-        temperature: entropy 計算的 softmax 溫度（預設 0.1）
+        probs: (N_test, N_models) 預測分數矩陣（argmax 為所選模型）
+        data:  RouterData（只使用 test_score / test_tokens / test_time）
 
     Returns:
         {"mu", "vb", "ep", "avg_tokens", "avg_latency"}
@@ -54,7 +50,7 @@ def evaluate(
     mu = float(np.mean(selected))
     oracle_score = float(np.mean(np.max(Y, axis=1)))
     vb = mu / oracle_score if oracle_score > 0 else 0.0
-    ep = _softmax_entropy(probs, temperature)
+    ep = _softmax_entropy(probs)
 
     avg_tokens = avg_latency = 0.0
     T, L = data.test_tokens, data.test_time

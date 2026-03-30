@@ -42,8 +42,8 @@ def _load_model(model_name: str):
 
 def get_embeddings(
     text_list: List[str],
-    model_name: str = "mixedbread-ai/mxbai-embed-large-v1",
-    batch_size: int = 16,
+    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    batch_size: int = 32,
 ) -> np.ndarray:
     """
     使用 HuggingFace transformer 模型計算 mean-pool 嵌入向量。
@@ -54,7 +54,7 @@ def get_embeddings(
 
     Args:
         text_list: 待嵌入的文字列表
-        model_name: HuggingFace 模型名稱（預設 mixedbread-ai/mxbai-embed-large-v1）
+        model_name: HuggingFace 模型名稱（預設 sentence-transformers/all-MiniLM-L6-v2）
         batch_size: 每批處理的文字數量
 
     Returns:
@@ -78,7 +78,7 @@ def get_embeddings(
             batch,
             padding=True,
             truncation=True,
-            max_length=8192,
+            max_length=128,
             return_tensors="pt",
         ).to(device)
         with torch.no_grad():

@@ -17,15 +17,15 @@ class KNNRouter(BaseRouter):
 
     Args:
         k: 近鄰數量（預設 10）
-        emb_model: 嵌入模型名稱（預設 all-MiniLM-L6-v2）
+        emb_model: 嵌入模型名稱（預設 sentence-transformers/all-MiniLM-L6-v2）
         emb_batch_size: 嵌入計算的 batch size
     """
 
     def __init__(
         self,
         k: int = 10,
-        emb_model: str = "mixedbread-ai/mxbai-embed-large-v1",
-        emb_batch_size: int = 16,
+        emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        emb_batch_size: int = 32,
     ) -> None:
         self.k = k
         self.emb_model = emb_model
@@ -37,6 +37,7 @@ class KNNRouter(BaseRouter):
     def _fit(self, data: RouterData) -> None:
         from sklearn.neighbors import NearestNeighbors
 
+        print(f"knn {len(data.train_prompt)}")
         if data.train_embed is not None:
             print(f"[KNN] 使用預存訓練集嵌入（{len(data.train_prompt)} 筆）...")
             self._X_train = data.train_embed
@@ -46,6 +47,7 @@ class KNNRouter(BaseRouter):
         self._Y_train = data.train_score.astype(np.float32)
 
         k = min(self.k, len(data.train_prompt))
+        print(k)
         self._nn = NearestNeighbors(n_neighbors=k, metric="cosine")
         self._nn.fit(self._X_train)
         print(f"[KNN] 訓練完成（k={k}）。")

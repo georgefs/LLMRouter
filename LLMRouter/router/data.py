@@ -95,18 +95,23 @@ class RouterData:
         eps: float = 0.15,
         min_samples: int = 2,
         metric: str = "cosine",
+        cluster_sample_ratio: float = 0.3,
+        seed: int = 42,
         embeddings: Optional[np.ndarray] = None,
         emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         emb_batch_size: int = 32,
     ) -> "RouterData":
         """
         以 DBSCAN 對訓練集的 prompt embedding 做近似去重。
-        每個 cluster 只保留第一筆（餘下視為重複）；DBSCAN 認定的雜訊點全部保留。
+        每個 cluster 隨機保留 cluster_sample_ratio 比例的樣本（至少 1 筆）；
+        DBSCAN 認定的雜訊點全部保留。
 
         Args:
             eps: DBSCAN 半徑（預設 0.15）
             min_samples: 形成 cluster 的最少樣本數（預設 2）
             metric: 距離度量（預設 "cosine"）
+            cluster_sample_ratio: 每個 cluster 保留的比例（預設 0.3）
+            seed: 隨機種子
             embeddings: 若已有訓練集 embedding 可直接傳入，省略重新計算
             emb_model: 嵌入模型名稱（embeddings=None 時使用）
             emb_batch_size: 嵌入計算 batch size
@@ -121,22 +126,34 @@ class RouterData:
         db = DBSCAN(eps=eps, min_samples=min_samples, metric=metric, algorithm="brute")
         labels = db.fit_predict(embeddings)
 
-        seen: set = set()
+        rng = np.random.default_rng(seed)
+        cluster_to_indices: dict = {}
         keep_idx = []
+
         for i, label in enumerate(labels):
-            if label == -1:          # 雜訊點：保留
+            if label == -1:  # 雜訊點：直接保留
                 keep_idx.append(i)
-            elif label not in seen:  # cluster 第一筆：保留
-                seen.add(label)
-                keep_idx.append(i)
-            # else: cluster 後續重複項：跳過
+            else:
+                cluster_to_indices.setdefault(label, []).append(i)
+
+        total_in_clusters = 0
+        total_retained = 0
+        for cluster_indices in cluster_to_indices.values():
+            n_cluster = len(cluster_indices)
+            n_keep = max(1, int(n_cluster * cluster_sample_ratio))
+            chosen = rng.choice(cluster_indices, size=n_keep, replace=False)
+            keep_idx.extend(chosen.tolist())
+            total_in_clusters += n_cluster
+            total_retained += n_keep
 
         keep_idx = np.array(keep_idx)
         n_removed = len(self.train_prompt) - len(keep_idx)
+        n_clusters = len(cluster_to_indices)
+        n_noise = int(np.sum(labels == -1))
         print(
-            f"[deduplicate_train] eps={eps}："
+            f"[deduplicate_train] eps={eps}，cluster_sample_ratio={cluster_sample_ratio}："
             f"保留 {len(keep_idx)} 筆，移除 {n_removed} 筆重複"
-            f"（{len(seen)} clusters，{np.sum(labels == -1)} 雜訊點）"
+            f"（{n_clusters} clusters 共 {total_in_clusters} 筆保留 {total_retained} 筆，{n_noise} 雜訊點）"
         )
         return self._select_train(keep_idx)
 
@@ -203,7 +220,7 @@ class DataPreparer:
         tokens_by_key_model: Optional[Dict[Tuple[str, str], float]] = None,
         times_by_key_model: Optional[Dict[Tuple[str, str], float]] = None,
         train_ratio: float = 0.6,
-        val_ratio: float = 0.1,
+        val_ratio: float = 0.2,
         seed: int = 42,
         emb_model: Optional[str] = None,
         emb_batch_size: int = 32,
@@ -220,7 +237,7 @@ class DataPreparer:
             tokens_by_key_model: (key, model) → token count 的 dict（可選）
             times_by_key_model: (key, model) → response time 的 dict（可選）
             train_ratio: 訓練集比例（預設 0.6）
-            val_ratio: 驗證集比例（預設 0.1）；剩餘皆為測試集（預設 0.3）
+            val_ratio: 驗證集比例（預設 0.2）；剩餘皆為測試集（預設 0.2）
             seed: 資料分割的隨機種子
         """
         if not records:
