@@ -7,7 +7,8 @@ Subcommands:
   annotation list <dataset>                           列出某 dataset 的 annotation strategy/model
   response gen <dataset> <model>                      用 litellm 對 dataset 做 inference
   extract --datasets d1,d2 --models m1,m2 --strategy s [--output out.jsonl]
-  annotation gen <dataset> <model> --judge <judge_model> [--strategy llm]
+  annotation gen <dataset> <model> --strategy official
+  annotation gen <dataset> <model> --strategy llm --judge <judge_model>
   router prepare --datasets d1,d2 --models m1,m2 --strategy s --output data.npz
   router train <type> --data data.npz [--output router.pkl] [router options]
   router eval <type> --data data.npz [--model router.pkl]
@@ -121,12 +122,11 @@ def _build_annotator(args: argparse.Namespace, config: dict):
         router = Router(model_list=config["model_list"])
         return LLMJudgeAnnotator(router=router, judge=args.judge)
 
-    # 其他 strategy 在此擴充，例如：
-    # if strategy == "cost":
-    #     from .annotator import CostAnnotator
-    #     return CostAnnotator(price_per_token=args.price_per_token)
+    if strategy == "official":
+        from .annotator import OfficialAnnotator
+        return OfficialAnnotator()
 
-    print(f"錯誤：未知 strategy '{strategy}'。目前支援：llm", file=sys.stderr)
+    print(f"錯誤：未知 strategy '{strategy}'。目前支援：llm, official", file=sys.stderr)
     sys.exit(1)
 
 
@@ -441,7 +441,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_al_gen.add_argument("dataset", help="dataset 名稱")
     p_al_gen.add_argument("model", help="被評估的 model 名稱")
     p_al_gen.add_argument("--strategy", required=True,
-                          help="annotator 類型：llm（LLM-as-Judge）、cost、…")
+                          help="annotator 類型：official（規則式官方評分）、llm（LLM-as-Judge）")
     # llm strategy 專用
     p_al_gen.add_argument("--judge", default=None,
                           help="[strategy=llm] judge LLM 的 model_name（需在 config.yaml 中）")
