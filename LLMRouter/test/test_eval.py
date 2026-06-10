@@ -127,6 +127,9 @@ class TestEvaluate:
             def predict_probs(self, prompts):
                 n, m = len(prompts), data.test_score.shape[1]
                 return np.full((n, m), 1.0 / m)
+            def save(self, path): pass
+            @classmethod
+            def load(cls, path_or_ck): return cls()
 
         r = FixedRouter()
         r.fit(data)

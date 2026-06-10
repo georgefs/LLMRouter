@@ -14,11 +14,10 @@ class BaseRouter(ABC):
     Router 基底類別。
 
     子類別需實作：
-        fit(data)            — 以 RouterData.train_* 訓練
+        _fit(data)             — 以 RouterData.train_* 訓練
         predict_probs(prompts) — 回傳 (N, M) 分數矩陣（argmax 為選擇的模型）
-
-    新增功能：
-        model_names 綁定：訓練時自動綁定 model_names，並通過 save/load 序列化
+        save(path)             — 序列化到 .pkl（或目錄）
+        load(path_or_ck)       — classmethod，從路徑或 checkpoint dict 還原
     """
 
     def __init__(self):
@@ -66,6 +65,15 @@ class BaseRouter(ABC):
         回傳 (N, M) 分數矩陣。
         分數不必是機率，argmax 將用於選擇模型。
         """
+
+    @abstractmethod
+    def save(self, path: "str | Path") -> None:
+        """序列化訓練後的 router 到 path（.pkl 或目錄）。"""
+
+    @classmethod
+    @abstractmethod
+    def load(cls, path_or_ck: "str | Path | dict") -> "BaseRouter":
+        """從路徑或已載入的 checkpoint dict 還原 router。"""
 
     def predict_indices(self, prompts: List[str]) -> np.ndarray:
         """

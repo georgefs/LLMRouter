@@ -189,21 +189,15 @@ class RoBERTaMLCRouter(BaseRouter):
         print(f"[RoBERTa] Saved to {path}")
 
     @classmethod
-    def load(cls, path: "str | Path") -> "RoBERTaMLCRouter":
-        """
-        載入訓練好的 router（恢復 RoBERTa 模型權重 + model_names）。
-
-        Args:
-            path: 載入路徑 (目錄)
-
-        Returns:
-            RoBERTaMLCRouter 實例，包含已恢復的 model_names 和模型
-        """
+    def load(cls, path_or_ck: "str | Path | dict") -> "RoBERTaMLCRouter":
+        """載入訓練好的 router（恢復 RoBERTa 模型權重 + model_names）。RoBERTa 僅支援目錄格式。"""
         from pathlib import Path
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
         import json
 
-        path = Path(path)
+        if isinstance(path_or_ck, dict):
+            raise TypeError("RoBERTaMLCRouter 不支援從 dict 載入，請傳入目錄路徑。")
+        path = Path(path_or_ck)
 
         # 載入配置
         config_path = path / "router_config.json"

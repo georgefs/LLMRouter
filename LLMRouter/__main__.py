@@ -231,7 +231,6 @@ def _build_router(router_type: str, args: argparse.Namespace):
 
 
 def cmd_router_train(args: argparse.Namespace) -> None:
-    import pickle
     from .router import RouterData
 
     data = RouterData.load(args.data)
@@ -240,11 +239,8 @@ def cmd_router_train(args: argparse.Namespace) -> None:
     r.fit(data)
 
     if args.output:
-        out = Path(args.output)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "wb") as f:
-            pickle.dump(r, f)
-        print(f"Router 已儲存 → {out}")
+        r.save(args.output)
+        print(f"Router 已儲存 → {args.output}")
 
 
 def cmd_router_bench(args: argparse.Namespace) -> None:
@@ -289,8 +285,8 @@ def cmd_router_bench(args: argparse.Namespace) -> None:
 
 
 def cmd_router_eval(args: argparse.Namespace) -> None:
-    import pickle
-    from .router import RouterData, OracleRouter, RandomRouter
+    from .router import RouterData
+    from .router.registry import get as get_router
 
     data = RouterData.load(args.data)
     router_type = args.router_type
@@ -299,8 +295,8 @@ def cmd_router_eval(args: argparse.Namespace) -> None:
         r = _build_router(router_type, args)
         r.fit(data)
     elif args.model:
-        with open(args.model, "rb") as f:
-            r = pickle.load(f)
+        cls, _ = get_router(router_type)
+        r = cls.load(args.model)
     else:
         print("錯誤: 非 oracle/random router 需要 --model 指定已訓練的 router 檔案。", file=sys.stderr)
         sys.exit(1)
