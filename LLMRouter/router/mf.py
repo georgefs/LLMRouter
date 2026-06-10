@@ -163,6 +163,7 @@ class MFRouter(BaseRouter):
         path.parent.mkdir(parents=True, exist_ok=True)
 
         checkpoint = {
+            'router_type': 'mf',
             'model_names': self.model_names,
             'latent_dim': self.latent_dim,
             'epochs': self.epochs,
@@ -180,24 +181,18 @@ class MFRouter(BaseRouter):
         print(f"[MF] Saved to {path}")
 
     @classmethod
-    def load(cls, path: "str | Path") -> "MFRouter":
-        """
-        載入訓練好的 router（恢復模型權重 + model_names）。
-
-        Args:
-            path: 載入路徑 (.pkl 檔案)
-
-        Returns:
-            MFRouter 實例，包含已恢復的 model_names 和權重
-        """
-        import pickle
-        from pathlib import Path
+    def load(cls, path_or_ck: "str | Path | dict") -> "MFRouter":
+        """載入訓練好的 router（恢復模型權重 + model_names）。"""
         import torch
 
-        path = Path(path)
-
-        with open(path, 'rb') as f:
-            checkpoint = pickle.load(f)
+        if isinstance(path_or_ck, dict):
+            checkpoint = path_or_ck
+        else:
+            import pickle
+            from pathlib import Path
+            with open(Path(path_or_ck), 'rb') as f:
+                checkpoint = pickle.load(f)
+            print(f"[MF] Loaded from {path_or_ck}")
 
         router = cls(
             latent_dim=checkpoint['latent_dim'],
@@ -229,7 +224,6 @@ class MFRouter(BaseRouter):
                 router._model.load_state_dict(checkpoint['model_state'])
                 router._model.eval()
 
-        print(f"[MF] Loaded from {path}")
         return router
 
 

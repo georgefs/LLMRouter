@@ -88,6 +88,7 @@ class KNNRouter(BaseRouter):
         path.parent.mkdir(parents=True, exist_ok=True)
 
         checkpoint = {
+            'router_type': 'knn',
             'model_names': self.model_names,
             'k': self.k,
             'emb_model': self.emb_model,
@@ -102,23 +103,16 @@ class KNNRouter(BaseRouter):
         print(f"[KNN] Saved to {path}")
 
     @classmethod
-    def load(cls, path: "str | Path") -> "KNNRouter":
-        """
-        載入訓練好的 router（恢復權重 + model_names）。
-
-        Args:
-            path: 載入路徑 (.pkl 檔案)
-
-        Returns:
-            KNNRouter 實例，包含已恢復的 model_names
-        """
-        import pickle
-        from pathlib import Path
-
-        path = Path(path)
-
-        with open(path, 'rb') as f:
-            checkpoint = pickle.load(f)
+    def load(cls, path_or_ck: "str | Path | dict") -> "KNNRouter":
+        """載入訓練好的 router（恢復權重 + model_names）。"""
+        if isinstance(path_or_ck, dict):
+            checkpoint = path_or_ck
+        else:
+            import pickle
+            from pathlib import Path
+            with open(Path(path_or_ck), 'rb') as f:
+                checkpoint = pickle.load(f)
+            print(f"[KNN] Loaded from {path_or_ck}")
 
         router = cls(
             k=checkpoint['k'],
@@ -131,8 +125,6 @@ class KNNRouter(BaseRouter):
         router._nn = checkpoint['_nn']
         router._X_train = checkpoint['_X_train']
         router._Y_train = checkpoint['_Y_train']
-
-        print(f"[KNN] Loaded from {path}")
         return router
 
 

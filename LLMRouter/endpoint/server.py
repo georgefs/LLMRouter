@@ -9,7 +9,7 @@ Protocol:
     Response: {"selected_model": "gpt-4"}
 
   GET /health
-    Response: {"status": "ok", "router_type": "KNN"}
+    Response: {"status": "healthy", "router_type": "KNNRouter", "model_count": N}
 
   GET /models
     Response: {"models": [{"name": "gpt-4"}, ...]}
@@ -137,62 +137,70 @@ class LLMRouterEndpointServer:
         self._load_router()
 
     def _load_router(self):
-        """Load router from file."""
+        """Load router from file (single pickle.load)."""
         if not self.router_path.exists():
             raise FileNotFoundError(f"Router file not found: {self.router_path}")
 
         logger.info(f"Loading router from {self.router_path}")
 
-        # 自動推斷 router 類型並加載
-        router_class = self._infer_router_type()
-        self.router = router_class.load(self.router_path)
+        if self.router_path.is_dir():
+            cls = self._detect_type_dir(self.router_path)
+            self.router = cls.load(self.router_path)
+        else:
+            import pickle
+            with open(self.router_path, "rb") as f:
+                ck = pickle.load(f)
+            cls = self._detect_type_checkpoint(ck)
+            self.router = cls.load(ck)
 
         if self.router.model_names is None:
             raise ValueError("Router model_names not bound")
 
-        logger.info(
-            f"Router loaded successfully. Models: {self.router.model_names}"
-        )
+        logger.info(f"Router loaded: {self.router.__class__.__name__}, models={self.router.model_names}")
 
-    def _infer_router_type(self) -> type:
-        """Infer router type from pickled object."""
-        import pickle
+    def _detect_type_checkpoint(self, ck: dict) -> type:
+        """Determine router class from a loaded checkpoint dict."""
+        from ..router.registry import get as get_router
 
-        with open(self.router_path, "rb") as f:
-            checkpoint = pickle.load(f)
+        name = ck.get("router_type")
+        if name:
+            try:
+                cls, _ = get_router(name)
+                return cls
+            except KeyError:
+                raise ValueError(f"未知的 router_type：{name!r}")
 
-        # 從 checkpoint 推斷 router 類型
-        if isinstance(checkpoint, dict):
-            # 新式 save/load 格式
-            from ..router import (
-                KNNRouter,
-                OracleRouter,
-                RandomRouter,
-                MFRouter,
-                SWRankingRouter,
-                RoBERTaMLCRouter,
-                GRPORouter,
-            )
+        # 向後相容：舊檔案無 router_type 欄位
+        logger.warning("舊格式 checkpoint（無 router_type），使用特徵偵測")
+        from ..router import KNNRouter, OracleRouter, RandomRouter, MFRouter, SWRankingRouter, GRPORouter
+        if "_nn" in ck:
+            return KNNRouter
+        if "seed" in ck and "_n_models" in ck:
+            return RandomRouter
+        if "policy_state" in ck:
+            return GRPORouter
+        if "_X_train" in ck and "_Y_train" in ck:
+            return SWRankingRouter
+        if "model_state" in ck:
+            return MFRouter
+        return OracleRouter
 
-            # 檢查特徵來判斷 router 類型
-            if "_nn" in checkpoint:
-                return KNNRouter
-            elif "seed" in checkpoint and "_n_models" in checkpoint:
-                return RandomRouter
-            elif "policy_state" in checkpoint:
-                return GRPORouter
-            elif "_X_train" in checkpoint and "_Y_train" in checkpoint:
-                if "model_name" in checkpoint:
-                    return RoBERTaMLCRouter
-                else:
-                    return SWRankingRouter
-            elif "weights" in checkpoint:
-                return MFRouter
-            else:
-                # 預設為 OracleRouter
-                return OracleRouter
-        else:
-            raise ValueError(f"Unsupported checkpoint format: {type(checkpoint)}")
+    def _detect_type_dir(self, path: Path) -> type:
+        """Determine router class from a directory (HuggingFace format)."""
+        import json
+        from ..router.registry import get as get_router
+
+        config_path = path / "router_config.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                config = json.load(f)
+            name = config.get("router_type")
+            if name:
+                cls, _ = get_router(name)
+                return cls
+
+        from ..router import RoBERTaMLCRouter
+        return RoBERTaMLCRouter
 
     def start(self):
         """Start the HTTP server."""

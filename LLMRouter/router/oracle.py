@@ -68,26 +68,25 @@ class OracleRouter(BaseRouter):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        checkpoint = {'model_names': self.model_names}
+        checkpoint = {'router_type': 'oracle', 'model_names': self.model_names}
         with open(path, 'wb') as f:
             pickle.dump(checkpoint, f)
         print(f"[Oracle] Saved to {path}")
 
     @classmethod
-    def load(cls, path: "str | Path") -> "OracleRouter":
+    def load(cls, path_or_ck: "str | Path | dict") -> "OracleRouter":
         """載入 OracleRouter。"""
-        import pickle
-        from pathlib import Path
-
-        path = Path(path)
-
-        with open(path, 'rb') as f:
-            checkpoint = pickle.load(f)
+        if isinstance(path_or_ck, dict):
+            checkpoint = path_or_ck
+        else:
+            import pickle
+            from pathlib import Path
+            with open(Path(path_or_ck), 'rb') as f:
+                checkpoint = pickle.load(f)
+            print(f"[Oracle] Loaded from {path_or_ck}")
 
         router = cls()
         router.model_names = checkpoint['model_names']
-
-        print(f"[Oracle] Loaded from {path}")
         return router
 
 
@@ -151,6 +150,7 @@ class RandomRouter(BaseRouter):
         path.parent.mkdir(parents=True, exist_ok=True)
 
         checkpoint = {
+            'router_type': 'random',
             'model_names': self.model_names,
             'seed': self.seed,
             '_n_models': self._n_models,
@@ -160,21 +160,20 @@ class RandomRouter(BaseRouter):
         print(f"[Random] Saved to {path}")
 
     @classmethod
-    def load(cls, path: "str | Path") -> "RandomRouter":
+    def load(cls, path_or_ck: "str | Path | dict") -> "RandomRouter":
         """載入 RandomRouter。"""
-        import pickle
-        from pathlib import Path
-
-        path = Path(path)
-
-        with open(path, 'rb') as f:
-            checkpoint = pickle.load(f)
+        if isinstance(path_or_ck, dict):
+            checkpoint = path_or_ck
+        else:
+            import pickle
+            from pathlib import Path
+            with open(Path(path_or_ck), 'rb') as f:
+                checkpoint = pickle.load(f)
+            print(f"[Random] Loaded from {path_or_ck}")
 
         router = cls(seed=checkpoint['seed'])
         router.model_names = checkpoint['model_names']
         router._n_models = checkpoint['_n_models']
-
-        print(f"[Random] Loaded from {path}")
         return router
 
 

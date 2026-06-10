@@ -99,6 +99,7 @@ class SWRankingRouter(BaseRouter):
         path.parent.mkdir(parents=True, exist_ok=True)
 
         checkpoint = {
+            'router_type': 'sw',
             'model_names': self.model_names,
             'k': self.k,
             'temperature': self.temperature,
@@ -113,23 +114,16 @@ class SWRankingRouter(BaseRouter):
         print(f"[SW] Saved to {path}")
 
     @classmethod
-    def load(cls, path: "str | Path") -> "SWRankingRouter":
-        """
-        載入訓練好的 router（恢復訓練集 embeddings + model_names）。
-
-        Args:
-            path: 載入路徑 (.pkl 檔案)
-
-        Returns:
-            SWRankingRouter 實例，包含已恢復的 model_names
-        """
-        import pickle
-        from pathlib import Path
-
-        path = Path(path)
-
-        with open(path, 'rb') as f:
-            checkpoint = pickle.load(f)
+    def load(cls, path_or_ck: "str | Path | dict") -> "SWRankingRouter":
+        """載入訓練好的 router（恢復訓練集 embeddings + model_names）。"""
+        if isinstance(path_or_ck, dict):
+            checkpoint = path_or_ck
+        else:
+            import pickle
+            from pathlib import Path
+            with open(Path(path_or_ck), 'rb') as f:
+                checkpoint = pickle.load(f)
+            print(f"[SW] Loaded from {path_or_ck}")
 
         router = cls(
             k=checkpoint['k'],
@@ -138,12 +132,9 @@ class SWRankingRouter(BaseRouter):
             emb_batch_size=checkpoint['emb_batch_size'],
         )
 
-        # 恢復 model_names 和訓練數據
         router.model_names = checkpoint['model_names']
         router._X_train = checkpoint['_X_train']
         router._Y_train = checkpoint['_Y_train']
-
-        print(f"[SW] Loaded from {path}")
         return router
 
 

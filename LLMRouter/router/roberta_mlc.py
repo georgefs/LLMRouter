@@ -170,6 +170,7 @@ class RoBERTaMLCRouter(BaseRouter):
         # 保存 model_names 和配置到檔案
         import json
         config = {
+            'router_type': 'roberta',
             'model_names': self.model_names,
             'model_name': self.model_name,
             'epochs': self.epochs,
