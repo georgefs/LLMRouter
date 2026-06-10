@@ -25,7 +25,9 @@ def sample_data():
     """建立簡單的 RouterData 用於測試"""
     n_samples = 50
     n_models = 3
-    embedding_dim = 128
+    # 必須與 KNNRouter 的預設 embedding 模型維度一致
+    # sentence-transformers/all-MiniLM-L6-v2 → 384 維
+    embedding_dim = 384
 
     prompts = [f"query_{i}" for i in range(n_samples)]
     embeddings = np.random.randn(n_samples, embedding_dim).astype(np.float32)
