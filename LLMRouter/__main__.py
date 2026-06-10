@@ -364,6 +364,19 @@ def _add_router_args(p: argparse.ArgumentParser) -> None:
         help="KNN / MF / SW: 嵌入模型名稱",
     )
     p.add_argument("--roberta-model", dest="roberta_model", default="roberta-base", help="RoBERTa: 模型名稱")
+    p.add_argument(
+        "--semantic-api-url",
+        dest="semantic_api_url",
+        default="http://localhost:8080",
+        help="SemanticAPI: semantic-router API server base URL（預設 http://localhost:8080）",
+    )
+    p.add_argument(
+        "--semantic-api-timeout",
+        dest="semantic_api_timeout",
+        type=float,
+        default=10.0,
+        help="SemanticAPI: 每次請求 timeout（秒，預設 10.0）",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

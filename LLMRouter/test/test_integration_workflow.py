@@ -5,6 +5,7 @@
 """
 
 import json
+import socket
 import threading
 import time
 import urllib.request
@@ -20,14 +21,21 @@ from LLMRouter.endpoint import LLMRouterEndpointServer
 TEST_ROUTER_PATH = Path(__file__).parent.parent / "test_data" / "test_router.pkl"
 
 
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 @pytest.fixture(scope="session")
 def endpoint_server():
     """啟動測試用的 Endpoint Server"""
     if not TEST_ROUTER_PATH.exists():
         pytest.skip(f"Test router not found: {TEST_ROUTER_PATH}")
 
-    port = 8899
+    port = _free_port()
     server = LLMRouterEndpointServer(TEST_ROUTER_PATH, port=port, host="127.0.0.1")
+    server._test_base_url = f"http://127.0.0.1:{port}"
 
     # 在後臺執行伺服器
     thread = threading.Thread(target=server.start, daemon=True)
@@ -44,7 +52,7 @@ class TestSemanticRouterIntegration:
     """模擬 semantic-router 調用 LLMRouter endpoint 的測試"""
 
     @staticmethod
-    def _call_route(query: str, base_url: str = "http://127.0.0.1:8899") -> dict:
+    def _call_route(query: str, base_url: str) -> dict:
         """模擬 semantic-router RouterR1Client.Route() 調用"""
         request_data = json.dumps({"query": query}).encode("utf-8")
         req = urllib.request.Request(
@@ -57,20 +65,20 @@ class TestSemanticRouterIntegration:
         return json.loads(response.read().decode("utf-8"))
 
     @staticmethod
-    def _call_health(base_url: str = "http://127.0.0.1:8899") -> dict:
+    def _call_health(base_url: str) -> dict:
         """調用健康檢查"""
         response = urllib.request.urlopen(f"{base_url}/health")
         return json.loads(response.read().decode("utf-8"))
 
     @staticmethod
-    def _call_models(base_url: str = "http://127.0.0.1:8899") -> dict:
+    def _call_models(base_url: str) -> dict:
         """調用模型列表"""
         response = urllib.request.urlopen(f"{base_url}/models")
         return json.loads(response.read().decode("utf-8"))
 
     def test_server_health(self, endpoint_server):
         """驗證 endpoint 伺服器健康"""
-        data = self._call_health()
+        data = self._call_health(endpoint_server._test_base_url)
 
         assert data["status"] == "healthy"
         assert "router_type" in data
@@ -78,7 +86,7 @@ class TestSemanticRouterIntegration:
 
     def test_models_list(self, endpoint_server):
         """驗證模型列表"""
-        data = self._call_models()
+        data = self._call_models(endpoint_server._test_base_url)
 
         assert "models" in data
         models = [m["name"] for m in data["models"]]
@@ -93,7 +101,7 @@ class TestSemanticRouterIntegration:
         # 模擬 semantic-router RLDrivenSelector.selectWithRouterR1() 的調用
         query = "Task: classify customer feedback\nAvailable models: gpt-4, gpt-3.5-turbo, claude-3"
 
-        response = self._call_route(query)
+        response = self._call_route(query, endpoint_server._test_base_url)
 
         # 驗證回應格式
         assert "selected_model" in response
@@ -114,7 +122,7 @@ class TestSemanticRouterIntegration:
 
         results = []
         for query in queries:
-            response = self._call_route(query)
+            response = self._call_route(query, endpoint_server._test_base_url)
             selected = response["selected_model"]
             results.append(selected)
             print(f"✓ {query.split(chr(10))[0][:30]}... → {selected}")
@@ -129,13 +137,14 @@ class TestSemanticRouterIntegration:
         """測試並行請求"""
         import concurrent.futures
 
+        base_url = endpoint_server._test_base_url
         queries = [
             f"Task: test_{i}\nAvailable models: gpt-4, gpt-3.5-turbo, claude-3"
             for i in range(10)
         ]
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(self._call_route, q) for q in queries]
+            futures = [executor.submit(self._call_route, q, base_url) for q in queries]
             results = [f.result() for f in concurrent.futures.as_completed(futures)]
 
         assert len(results) == len(queries)
@@ -145,8 +154,9 @@ class TestSemanticRouterIntegration:
 
     def test_response_format_matches_semantic_router_spec(self, endpoint_server):
         """驗證回應格式與 semantic-router RouterR1Client 期望一致"""
+        base_url = endpoint_server._test_base_url
         query = "Task: test\nAvailable models: gpt-4, gpt-3.5-turbo, claude-3"
-        response = self._call_route(query)
+        response = self._call_route(query, base_url)
 
         # semantic-router 期望的回應格式
         assert isinstance(response, dict)
@@ -154,7 +164,7 @@ class TestSemanticRouterIntegration:
         assert isinstance(response["selected_model"], str)
 
         # 選中的模型必須存在
-        models = self._call_models()
+        models = self._call_models(base_url)
         model_names = [m["name"] for m in models["models"]]
         assert response["selected_model"] in model_names
 
@@ -174,7 +184,7 @@ class TestSemanticRouterIntegration:
         # 模擬 semantic-router RouterR1Client.Route() 的調用
         request_data = json.dumps({"query": query}).encode("utf-8")
         req = urllib.request.Request(
-            "http://127.0.0.1:8899/route",
+            f"{endpoint_server._test_base_url}/route",
             data=request_data,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -199,19 +209,20 @@ class TestEndToEndWorkflow:
 
     def test_semantic_router_rl_driven_workflow(self, endpoint_server):
         """模擬完整的 semantic-router RL-driven routing workflow"""
+        base_url = endpoint_server._test_base_url
         print("\n" + "=" * 60)
         print("Semantic Router RL-Driven Routing Workflow")
         print("=" * 60)
 
         # 步驟 1: 檢查伺服器健康
         print("\n步驟 1: 檢查伺服器健康")
-        health = urllib.request.urlopen("http://127.0.0.1:8899/health")
+        health = urllib.request.urlopen(f"{base_url}/health")
         assert health.status == 200
         print("✓ Endpoint server is healthy")
 
         # 步驟 2: 獲取可用模型
         print("\n步驟 2: 獲取可用模型")
-        models_resp = urllib.request.urlopen("http://127.0.0.1:8899/models")
+        models_resp = urllib.request.urlopen(f"{base_url}/models")
         models = json.loads(models_resp.read().decode("utf-8"))
         model_names = [m["name"] for m in models["models"]]
         print(f"✓ Available models: {model_names}")
@@ -229,7 +240,7 @@ class TestEndToEndWorkflow:
             query = f"Task: {task}\nAvailable models: {', '.join(models)}"
             request_data = json.dumps({"query": query}).encode("utf-8")
             req = urllib.request.Request(
-                "http://127.0.0.1:8899/route",
+                f"{base_url}/route",
                 data=request_data,
                 headers={"Content-Type": "application/json"},
                 method="POST",

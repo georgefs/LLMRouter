@@ -8,6 +8,7 @@ from .registry import build as build_router
 from .registry import get as get_router
 from .registry import list_routers
 from .roberta_mlc import RoBERTaMLCRouter
+from .semantic_api import SemanticAPIRouter
 from .sw_ranking import SWRankingRouter
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "SWRankingRouter",
     "RoBERTaMLCRouter",
     "GRPORouter",
+    "SemanticAPIRouter",
     "build_router",
     "get_router",
     "list_routers",
