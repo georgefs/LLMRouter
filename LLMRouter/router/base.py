@@ -16,7 +16,13 @@ class BaseRouter(ABC):
     子類別需實作：
         fit(data)            — 以 RouterData.train_* 訓練
         predict_probs(prompts) — 回傳 (N, M) 分數矩陣（argmax 為選擇的模型）
+
+    新增功能：
+        model_names 綁定：訓練時自動綁定 model_names，並通過 save/load 序列化
     """
+
+    def __init__(self):
+        self.model_names: "List[str] | None" = None
 
     def fit(
         self,
@@ -27,6 +33,8 @@ class BaseRouter(ABC):
         """
         以訓練集訓練 router。
 
+        新增功能：自動綁定 model_names
+
         Args:
             data: RouterData
             train_size: 訓練資料大小
@@ -34,6 +42,16 @@ class BaseRouter(ABC):
                         int   → 固定筆數（≥ 1）
             seed: subsample 的隨機種子
         """
+        # 綁定 model_names
+        if self.model_names is None:
+            self.model_names = data.models.copy()
+        else:
+            if self.model_names != data.models:
+                raise ValueError(
+                    f"Model mismatch: router already bound to {self.model_names}, "
+                    f"but data has {data.models}"
+                )
+
         if train_size != 1.0:
             data = data.subsample_train(train_size, seed=seed)
         self._fit(data)

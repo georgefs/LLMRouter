@@ -38,6 +38,7 @@ class MFRouter(BaseRouter):
         emb_batch_size: int = 16,
         seed: int = 42,
     ) -> None:
+        super().__init__()
         self.latent_dim = latent_dim
         self.epochs = epochs
         self.batch_size = batch_size
@@ -147,3 +148,86 @@ class MFRouter(BaseRouter):
         if data.test_embed is not None:
             return self._predict_from_embed(data.test_embed)
         return self.predict_probs(data.test_prompt)
+
+    def save(self, path: "str | Path") -> None:
+        """
+        保存訓練好的 router（包含模型權重 + model_names）。
+
+        Args:
+            path: 保存路徑 (.pkl 檔案)
+        """
+        import pickle
+        from pathlib import Path
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint = {
+            'model_names': self.model_names,
+            'latent_dim': self.latent_dim,
+            'epochs': self.epochs,
+            'batch_size': self.batch_size,
+            'lr': self.lr,
+            'dropout': self.dropout,
+            'emb_model': self.emb_model,
+            'emb_batch_size': self.emb_batch_size,
+            'seed': self.seed,
+            'model_state': self._model.state_dict() if self._model else None,
+        }
+
+        with open(path, 'wb') as f:
+            pickle.dump(checkpoint, f)
+        print(f"[MF] Saved to {path}")
+
+    @classmethod
+    def load(cls, path: "str | Path") -> "MFRouter":
+        """
+        載入訓練好的 router（恢復模型權重 + model_names）。
+
+        Args:
+            path: 載入路徑 (.pkl 檔案)
+
+        Returns:
+            MFRouter 實例，包含已恢復的 model_names 和權重
+        """
+        import pickle
+        from pathlib import Path
+        import torch
+
+        path = Path(path)
+
+        with open(path, 'rb') as f:
+            checkpoint = pickle.load(f)
+
+        router = cls(
+            latent_dim=checkpoint['latent_dim'],
+            epochs=checkpoint['epochs'],
+            batch_size=checkpoint['batch_size'],
+            lr=checkpoint['lr'],
+            dropout=checkpoint['dropout'],
+            emb_model=checkpoint['emb_model'],
+            emb_batch_size=checkpoint['emb_batch_size'],
+            seed=checkpoint['seed'],
+        )
+
+        # 恢復 model_names
+        router.model_names = checkpoint['model_names']
+
+        # 恢復模型
+        if checkpoint['model_state'] is not None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            router._device = device
+
+            # 需要先建立模型結構
+            num_models = len(router.model_names)
+            # 推斷 input_dim（從狀態字典）
+            # projection 的輸入維度可從權重推斷
+            projection_weight = checkpoint['model_state'].get('projection.0.weight')
+            if projection_weight is not None:
+                input_dim = projection_weight.shape[1]
+                router._model = router._build_net(input_dim, num_models).to(device)
+                router._model.load_state_dict(checkpoint['model_state'])
+                router._model.eval()
+
+        print(f"[MF] Loaded from {path}")
+        return router

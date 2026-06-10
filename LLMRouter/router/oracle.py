@@ -16,6 +16,9 @@ class OracleRouter(BaseRouter):
     Entropy 計算採用 L1-normalized 分數（與 RouterEval r_o_router.py 一致）。
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+
     def _fit(self, data: RouterData) -> None:
         pass  # Oracle 不需要訓練
 
@@ -57,6 +60,36 @@ class OracleRouter(BaseRouter):
             "avg_latency": avg_latency,
         }
 
+    def save(self, path: "str | Path") -> None:
+        """保存 OracleRouter（只需保存 model_names）。"""
+        import pickle
+        from pathlib import Path
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint = {'model_names': self.model_names}
+        with open(path, 'wb') as f:
+            pickle.dump(checkpoint, f)
+        print(f"[Oracle] Saved to {path}")
+
+    @classmethod
+    def load(cls, path: "str | Path") -> "OracleRouter":
+        """載入 OracleRouter。"""
+        import pickle
+        from pathlib import Path
+
+        path = Path(path)
+
+        with open(path, 'rb') as f:
+            checkpoint = pickle.load(f)
+
+        router = cls()
+        router.model_names = checkpoint['model_names']
+
+        print(f"[Oracle] Loaded from {path}")
+        return router
+
 
 class RandomRouter(BaseRouter):
     """
@@ -66,6 +99,7 @@ class RandomRouter(BaseRouter):
     """
 
     def __init__(self, seed: int = 42) -> None:
+        super().__init__()
         self.seed = seed
         self._n_models: int = 0
 
@@ -107,3 +141,38 @@ class RandomRouter(BaseRouter):
             "avg_tokens": avg_tokens,
             "avg_latency": avg_latency,
         }
+
+    def save(self, path: "str | Path") -> None:
+        """保存 RandomRouter（保存 seed + model_names）。"""
+        import pickle
+        from pathlib import Path
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint = {
+            'model_names': self.model_names,
+            'seed': self.seed,
+            '_n_models': self._n_models,
+        }
+        with open(path, 'wb') as f:
+            pickle.dump(checkpoint, f)
+        print(f"[Random] Saved to {path}")
+
+    @classmethod
+    def load(cls, path: "str | Path") -> "RandomRouter":
+        """載入 RandomRouter。"""
+        import pickle
+        from pathlib import Path
+
+        path = Path(path)
+
+        with open(path, 'rb') as f:
+            checkpoint = pickle.load(f)
+
+        router = cls(seed=checkpoint['seed'])
+        router.model_names = checkpoint['model_names']
+        router._n_models = checkpoint['_n_models']
+
+        print(f"[Random] Loaded from {path}")
+        return router

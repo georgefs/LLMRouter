@@ -57,6 +57,7 @@ class GRPORouter(BaseRouter):
         emb_batch_size: int = 32,
         seed: int = 42,
     ) -> None:
+        super().__init__()
         self.group_size = group_size
         self.hidden_dim = hidden_dim
         self.epochs = epochs
@@ -228,3 +229,96 @@ class GRPORouter(BaseRouter):
             scores = torch.softmax(logits, dim=-1).cpu().numpy()
 
         return scores.astype(np.float32)
+
+    def save(self, path: "str | Path") -> None:
+        """
+        保存訓練好的 router（包含 policy 權重 + model_names）。
+
+        Args:
+            path: 保存路徑 (.pkl 檔案)
+        """
+        import pickle
+        from pathlib import Path
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        if self._policy is None:
+            raise RuntimeError("Router must be trained first (call fit())")
+
+        checkpoint = {
+            'model_names': self.model_names,
+            'group_size': self.group_size,
+            'hidden_dim': self.hidden_dim,
+            'epochs': self.epochs,
+            'batch_size': self.batch_size,
+            'lr': self.lr,
+            'clip_eps': self.clip_eps,
+            'kl_coef': self.kl_coef,
+            'entropy_coef': self.entropy_coef,
+            'update_steps': self.update_steps,
+            'emb_model': self.emb_model,
+            'emb_batch_size': self.emb_batch_size,
+            'seed': self.seed,
+            'policy_state': self._policy.state_dict(),
+        }
+
+        with open(path, 'wb') as f:
+            pickle.dump(checkpoint, f)
+        print(f"[GRPO] Saved to {path}")
+
+    @classmethod
+    def load(cls, path: "str | Path") -> "GRPORouter":
+        """
+        載入訓練好的 router（恢復 policy 權重 + model_names）。
+
+        Args:
+            path: 載入路徑 (.pkl 檔案)
+
+        Returns:
+            GRPORouter 實例，包含已恢復的 model_names 和 policy
+        """
+        import pickle
+        from pathlib import Path
+        import torch
+
+        path = Path(path)
+
+        with open(path, 'rb') as f:
+            checkpoint = pickle.load(f)
+
+        router = cls(
+            group_size=checkpoint['group_size'],
+            hidden_dim=checkpoint['hidden_dim'],
+            epochs=checkpoint['epochs'],
+            batch_size=checkpoint['batch_size'],
+            lr=checkpoint['lr'],
+            clip_eps=checkpoint['clip_eps'],
+            kl_coef=checkpoint['kl_coef'],
+            entropy_coef=checkpoint['entropy_coef'],
+            update_steps=checkpoint['update_steps'],
+            emb_model=checkpoint['emb_model'],
+            emb_batch_size=checkpoint['emb_batch_size'],
+            seed=checkpoint['seed'],
+        )
+
+        # 恢復 model_names
+        router.model_names = checkpoint['model_names']
+
+        # 恢復 policy
+        if checkpoint['policy_state'] is not None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            router._device = device
+
+            # 需要先建立 policy 結構
+            num_models = len(router.model_names)
+            # 推斷 input_dim（從狀態字典）
+            fc_weight = checkpoint['policy_state'].get('fc1.weight')
+            if fc_weight is not None:
+                input_dim = fc_weight.shape[1]
+                router._policy = router._build_policy(input_dim, num_models).to(device)
+                router._policy.load_state_dict(checkpoint['policy_state'])
+                router._policy.eval()
+
+        print(f"[GRPO] Loaded from {path}")
+        return router
