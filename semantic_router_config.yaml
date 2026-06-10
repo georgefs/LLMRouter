@@ -84,173 +84,39 @@ routing:
 
   # 決策配置 - 定義不同的路由策略
   decisions:
-    # 決策 1: 常規查詢
+    # catch-all: rules.conditions 空陣列匹配所有請求（confidence=0）
+    # 若有其他帶 signal 條件的 decision，它們因 confidence 較高會優先
     - name: general
-      categories:
-        - general
-        - faq
+      description: "General purpose queries (catch-all)"
+      priority: 1
+      rules:
+        operator: AND
+        conditions: []
       modelRefs:
-        - gpt-3.5-turbo      # 簡單查詢用便宜模型
-        - gpt-4              # 複雜查詢用強力模型
-        - claude-3           # 備選方案
+        - model: gpt-3.5-turbo
+          weight: 0.4
+        - model: gpt-4
+          weight: 0.3
+        - model: claude-3
+          weight: 0.3
       default_model: gpt-3.5-turbo
+      algorithm:
+        type: rl_driven
+        rl_driven:
+          enable_llm_routing: true
+          # Docker 部署: 使用 bridge gateway IP，不可用 localhost/127.0.0.1
+          # 查詢方式: docker network inspect vllm-sr-network | grep Gateway
+          router_r1_server_url: "http://172.21.0.1:8123"
+          llm_routing_fallback: thompson
+          exploration_rate: 0.15
+          exploration_decay: 0.97
+          min_exploration: 0.03
+          use_thompson_sampling: true
+          cost_awareness: true
+          cost_weight: 0.2
+          use_router_r1_rewards: true
+          cost_reward_alpha: 0.3
+          format_reward_penalty: -1.0
+          storage_path: state/rl-driven.json
+          auto_save_interval: 30s
 
-    # 決策 2: 代碼相關
-    - name: coding
-      categories:
-        - code_generation
-        - debugging
-        - code_review
-      modelRefs:
-        - gpt-4              # 代碼生成優先用 GPT-4
-        - claude-3           # Claude 也不錯
-        - gpt-3.5-turbo      # 簡單代碼可用
-      default_model: gpt-4
-
-    # 決策 3: 分析/推理
-    - name: analysis
-      categories:
-        - reasoning
-        - analysis
-        - research
-      modelRefs:
-        - gpt-4              # 複雜推理用 GPT-4
-        - claude-3           # Claude 推理能力強
-        - gpt-3.5-turbo      # 簡單分析備選
-      default_model: gpt-4
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 演算法配置: RL-driven 路由 + LLMRouter
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-algorithm:
-  type: rl_driven
-  rl_driven:
-    # ── 探索/利用平衡 ────────────────────────────────────────────────────
-    # 初始探索率：新模型有 15% 機率被選中（即使不是最佳選擇）
-    exploration_rate: 0.15
-
-    # 探索衰減：每 100 次選擇後探索率乘以 0.97（逐漸減少探索）
-    exploration_decay: 0.97
-
-    # 最小探索率：不會低於 3%（即使在大量訓練後）
-    min_exploration: 0.03
-
-    # Thompson Sampling：使用統計方法平衡探索和利用
-    use_thompson_sampling: true
-
-    # ── 個性化配置 ─────────────────────────────────────────────────────
-    # 啟用每用戶的偏好追蹤
-    enable_personalization: true
-
-    # 個性化混合：40% 用戶特定偏好 + 60% 全局偏好
-    personalization_blend: 0.4
-
-    # ── 會話上下文 ─────────────────────────────────────────────────────
-    # 會話內的最近表現權重：35%
-    # 用於快速適應同一會話內的變化
-    session_context_weight: 0.35
-
-    # 隱式反饋權重：0.5
-    # 自動檢測的信號（如用戶沒有投訴）算一半的顯式反饋
-    implicit_feedback_weight: 0.5
-
-    # ── 成本感知 ────────────────────────────────────────────────────────
-    # 啟用成本感知探索：便宜模型優先於昂貴模型進行探索
-    cost_awareness: true
-
-    # 成本權重：成本對決策的影響（20%）
-    cost_weight: 0.2
-
-    # ── Router-R1 獎勵 ──────────────────────────────────────────────────
-    # 啟用 Router-R1 論文的獎勵計算
-    # R = R_format + (1-α)*R_outcome + α*R_cost
-    use_router_r1_rewards: true
-
-    # 成本獎勵 Alpha：30% 成本因素 + 70% 結果品質
-    cost_reward_alpha: 0.3
-
-    # 格式錯誤懲罰：-1.0（嚴厲懲罰格式不正確的回應）
-    format_reward_penalty: -1.0
-
-    # ── LLM 路由配置（最重要部分）──────────────────────────────────────
-    # 啟用 LLM-based 智能路由（使用 LLMRouter）
-    enable_llm_routing: true
-
-    # LLMRouter endpoint URL
-    # 這應該指向正在運行的 LLMRouter endpoint server
-    # 例如：python3 start_endpoint.py --router test_data/test_router.pkl --port 8888
-    router_r1_server_url: "http://localhost:8888"
-
-    # LLM 路由失敗時的降級策略
-    # "thompson": 降級到 Thompson Sampling
-    # "error": 直接返回錯誤
-    llm_routing_fallback: thompson
-
-    # 啟用多輪聚合：LLMRouter 可以選擇多個模型並聚合結果
-    enable_multi_round_aggregation: false
-
-    # 最大聚合輪數：最多查詢 3 個模型並聚合
-    max_aggregation_rounds: 3
-
-    # ── 持久化 ──────────────────────────────────────────────────────────
-    # RL 狀態儲存位置
-    storage_path: state/rl-driven.json
-
-    # 自動保存間隔：每 30 秒保存一次學習狀態
-    auto_save_interval: 30s
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 分類配置
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-classifiers:
-  intent:
-    enabled: true
-    categories:
-      - name: code_generation
-        description: 用戶要求生成代碼
-        signals:
-          - code
-          - function
-          - script
-          - write
-
-      - name: code_review
-        description: 代碼審查或調試
-        signals:
-          - bug
-          - fix
-          - debug
-          - error
-
-      - name: reasoning
-        description: 複雜推理或分析
-        signals:
-          - explain
-          - why
-          - how
-          - analyze
-
-      - name: general
-        description: 通用查詢
-        signals: []
-
-  pii:
-    enabled: true
-
-  security:
-    enabled: true
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 觀測和監控
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-observability:
-  logging:
-    level: info
-    format: json
-
-  metrics:
-    enabled: true
-    interval: 60s

@@ -52,60 +52,34 @@ routing:
 
   decisions:
     - name: general
-      categories: [general]
-      modelRefs: [gpt-3.5-turbo, gpt-4, claude-3]
+      description: "General purpose queries"
+      priority: 1
+      rules:
+        operator: AND
+        conditions: []
+      modelRefs:
+        - model: gpt-3.5-turbo
+          weight: 0.33
+        - model: gpt-4
+          weight: 0.33
+        - model: claude-3
+          weight: 0.34
       default_model: gpt-3.5-turbo
+      algorithm:
+        type: rl_driven
+        rl_driven:
+          enable_llm_routing: true
+          router_r1_server_url: "http://172.21.0.1:8123"
+          llm_routing_fallback: thompson
+          exploration_rate: 0.15
+          exploration_decay: 0.97
+          min_exploration: 0.03
+          use_thompson_sampling: true
+          cost_awareness: true
+          cost_weight: 0.2
+          use_router_r1_rewards: true
+          cost_reward_alpha: 0.3
+          format_reward_penalty: -1.0
+          storage_path: state/rl-driven.json
+          auto_save_interval: 30s
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 核心配置：LLMRouter RL-driven 路由
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-algorithm:
-  type: rl_driven
-  rl_driven:
-    # ✅ 啟用 LLMRouter 智能路由
-    enable_llm_routing: true
-    router_r1_server_url: "http://localhost:8888"
-    llm_routing_fallback: thompson
-
-    # 基礎 RL 參數
-    exploration_rate: 0.15
-    exploration_decay: 0.97
-    min_exploration: 0.03
-    use_thompson_sampling: true
-    enable_personalization: true
-    personalization_blend: 0.4
-    session_context_weight: 0.35
-    implicit_feedback_weight: 0.5
-    cost_awareness: true
-    cost_weight: 0.2
-
-    # Router-R1 獎勵
-    use_router_r1_rewards: true
-    cost_reward_alpha: 0.3
-    format_reward_penalty: -1.0
-
-    # 狀態保存
-    storage_path: state/rl-driven.json
-    auto_save_interval: 30s
-
-classifiers:
-  intent:
-    enabled: true
-    categories:
-      - name: general
-        description: General query
-
-  pii:
-    enabled: true
-
-  security:
-    enabled: true
-
-observability:
-  logging:
-    level: info
-    format: json
-  metrics:
-    enabled: true
-    interval: 60s
