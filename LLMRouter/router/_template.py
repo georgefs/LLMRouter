@@ -3,15 +3,16 @@
 ==================
 複製此檔案，全域搜尋 MyRouter / my_router 替換為實際名稱。
 
-最少需要實作
-------------
+必須實作
+--------
   _fit(data)              訓練邏輯，可讀取 data.train_embed（預計算嵌入）
   predict_probs(prompts)  推論，回傳 shape (N, M) 的分數矩陣
+  save(path)              序列化到 .pkl（checkpoint dict，需含 router_type 鍵）
+  load(path_or_ck)        classmethod，從路徑或已載入的 dict 還原
 
 可選覆寫
 --------
   _predict_for_eval(data) 若有預計算嵌入可避免重複計算（見 KNNRouter 範例）
-  save(path) / load(path) 若需要持久化超出 pickle 預設的欄位
 
 新增後不需修改任何其他檔案
 --------------------------
@@ -100,6 +101,7 @@ class MyRouter(BaseRouter):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         checkpoint = {
+            "router_type": "my_router",   # 必須與 register() 的 name 一致
             "model_names": self.model_names,
             "param_a": self.param_a,
             "param_b": self.param_b,
@@ -110,14 +112,17 @@ class MyRouter(BaseRouter):
         print(f"[MyRouter] Saved to {path}")
 
     @classmethod
-    def load(cls, path: "str | Path") -> "MyRouter":
-        path = Path(path)
-        with open(path, "rb") as f:
-            ck = pickle.load(f)
+    def load(cls, path_or_ck: "str | Path | dict") -> "MyRouter":
+        if isinstance(path_or_ck, dict):
+            ck = path_or_ck
+        else:
+            path_or_ck = Path(path_or_ck)
+            with open(path_or_ck, "rb") as f:
+                ck = pickle.load(f)
+            print(f"[MyRouter] Loaded from {path_or_ck}")
         r = cls(param_a=ck["param_a"], param_b=ck["param_b"])
         r.model_names = ck["model_names"]
         r._state = ck["_state"]
-        print(f"[MyRouter] Loaded from {path}")
         return r
 
 
