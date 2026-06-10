@@ -124,6 +124,42 @@ class TestRouterWorkflow:
             metrics = loaded.evaluate(sample_data)
             assert "mu" in metrics
 
+    def test_checkpoint_contains_router_type(self, sample_data):
+        """save() 寫入的 checkpoint 必須包含 router_type 鍵。"""
+        import pickle
+        for RouterCls, expected_type in [
+            (KNNRouter, "knn"),
+            (OracleRouter, "oracle"),
+            (RandomRouter, "random"),
+        ]:
+            router = RouterCls() if RouterCls is not KNNRouter else RouterCls(k=3)
+            router.fit(sample_data)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                path = Path(tmpdir) / "router.pkl"
+                router.save(path)
+                with open(path, "rb") as f:
+                    ck = pickle.load(f)
+                assert isinstance(ck, dict), f"{RouterCls.__name__}.save() 應儲存 dict checkpoint"
+                assert ck.get("router_type") == expected_type, (
+                    f"{RouterCls.__name__}: 期望 router_type={expected_type!r}，"
+                    f"實際={ck.get('router_type')!r}"
+                )
+
+    def test_load_from_dict_skips_pickle(self, sample_data):
+        """load(dict) 不應再讀 pickle 檔，直接從 dict 還原。"""
+        router = KNNRouter(k=3)
+        router.fit(sample_data)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "knn.pkl"
+            router.save(path)
+            import pickle
+            with open(path, "rb") as f:
+                ck = pickle.load(f)
+            # 從 dict 載入
+            loaded = KNNRouter.load(ck)
+            assert loaded.model_names == router.model_names
+            assert loaded.k == router.k
+
     def test_model_mismatch_error(self, sample_data):
         """防止綁定到不同的 model 列表"""
         router = KNNRouter(k=5)
