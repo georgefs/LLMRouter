@@ -15,9 +15,12 @@ import tempfile
 
 from LLMRouter.router import (
     RouterData,
+    GRPORouter,
     KNNRouter,
+    MFRouter,
     OracleRouter,
     RandomRouter,
+    SWRankingRouter,
 )
 
 
@@ -159,6 +162,68 @@ class TestRouterWorkflow:
             loaded = KNNRouter.load(ck)
             assert loaded.model_names == router.model_names
             assert loaded.k == router.k
+
+    def test_mf_router_workflow(self, sample_data):
+        """MFRouter: 訓練（用預計算嵌入）→ 保存 → 載入 → 預測。"""
+        router = MFRouter(epochs=3)
+        router.fit(sample_data)
+        assert router.model_names == sample_data.models
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "mf.pkl"
+            router.save(path)
+
+            import pickle
+            with open(path, "rb") as f:
+                ck = pickle.load(f)
+            assert ck.get("router_type") == "mf"
+
+            loaded = MFRouter.load(path)
+            assert loaded.model_names == sample_data.models
+            # 使用 evaluate() 走 _predict_for_eval 路徑（test_embed），避免重新計算嵌入
+            metrics = loaded.evaluate(sample_data)
+            assert "mu" in metrics
+
+    def test_sw_router_workflow(self, sample_data):
+        """SWRankingRouter: 訓練（用預計算嵌入）→ 保存 → 載入 → 評估。"""
+        router = SWRankingRouter(k=5)
+        router.fit(sample_data)
+        assert router.model_names == sample_data.models
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "sw.pkl"
+            router.save(path)
+
+            import pickle
+            with open(path, "rb") as f:
+                ck = pickle.load(f)
+            assert ck.get("router_type") == "sw"
+
+            loaded = SWRankingRouter.load(path)
+            assert loaded.model_names == sample_data.models
+            metrics = loaded.evaluate(sample_data)
+            assert "mu" in metrics
+
+    def test_grpo_router_workflow(self, sample_data):
+        """GRPORouter: 訓練（用預計算嵌入）→ 保存 → 載入 → 預測。"""
+        router = GRPORouter(epochs=2, group_size=4)
+        router.fit(sample_data)
+        assert router.model_names == sample_data.models
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "grpo.pkl"
+            router.save(path)
+
+            import pickle
+            with open(path, "rb") as f:
+                ck = pickle.load(f)
+            assert ck.get("router_type") == "grpo"
+
+            loaded = GRPORouter.load(path)
+            assert loaded.model_names == sample_data.models
+            # 評估時使用預計算嵌入，不需下載模型
+            metrics = loaded.evaluate(sample_data)
+            assert "mu" in metrics
 
     def test_model_mismatch_error(self, sample_data):
         """防止綁定到不同的 model 列表"""

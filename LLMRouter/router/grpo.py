@@ -111,8 +111,12 @@ class GRPORouter(BaseRouter):
         self._device = device
         print(f"[GRPO] Device: {device}")
 
-        print(f"[GRPO] 計算訓練集嵌入（{len(data.train_prompt)} 筆）...")
-        X_train = get_embeddings(data.train_prompt, self.emb_model, self.emb_batch_size)
+        if data.train_embed is not None:
+            print(f"[GRPO] 使用預存訓練集嵌入（{len(data.train_prompt)} 筆）...")
+            X_train = data.train_embed
+        else:
+            print(f"[GRPO] 計算訓練集嵌入（{len(data.train_prompt)} 筆）...")
+            X_train = get_embeddings(data.train_prompt, self.emb_model, self.emb_batch_size)
 
         X_t = torch.FloatTensor(X_train).to(device)
         Y_t = torch.FloatTensor(data.train_score).to(device)  # (N, M)
@@ -213,22 +217,28 @@ class GRPORouter(BaseRouter):
         self._policy = policy
         print("[GRPO] 訓練完成。")
 
-    def predict_probs(self, prompts: List[str]) -> np.ndarray:
+    def _predict_from_embed(self, X: np.ndarray) -> np.ndarray:
         import torch
-
-        if self._policy is None:
-            raise RuntimeError("請先呼叫 fit()")
-
-        print(f"[GRPO] 計算嵌入（{len(prompts)} 筆）...")
-        X = get_embeddings(prompts, self.emb_model, self.emb_batch_size)
         X_t = torch.FloatTensor(X).to(self._device)
-
         self._policy.eval()
         with torch.no_grad():
             logits = self._policy(X_t)
             scores = torch.softmax(logits, dim=-1).cpu().numpy()
-
         return scores.astype(np.float32)
+
+    def predict_probs(self, prompts: List[str]) -> np.ndarray:
+        if self._policy is None:
+            raise RuntimeError("請先呼叫 fit()")
+        print(f"[GRPO] 計算嵌入（{len(prompts)} 筆）...")
+        X = get_embeddings(prompts, self.emb_model, self.emb_batch_size)
+        return self._predict_from_embed(X)
+
+    def _predict_for_eval(self, data: RouterData) -> np.ndarray:
+        if self._policy is None:
+            raise RuntimeError("請先呼叫 fit()")
+        if data.test_embed is not None:
+            return self._predict_from_embed(data.test_embed)
+        return self.predict_probs(data.test_prompt)
 
     def save(self, path: "str | Path") -> None:
         """
