@@ -12,6 +12,7 @@ Subcommands:
   router prepare --datasets d1,d2 --models m1,m2 --strategy s --output data.npz
   router train <type> --data data.npz [--output router.pkl] [router options]
   router eval <type> --data data.npz [--model router.pkl]
+  router analyze data.npz                             四維根因分析（Technical Report §7）
 
 預處理選項（prepare / train / bench 共用）：
   --min-var <float>                  過濾低鑑別度訓練樣本（np.var(scores) ≤ min_var）
@@ -241,6 +242,57 @@ def cmd_router_train(args: argparse.Namespace) -> None:
     if args.output:
         r.save(args.output)
         print(f"Router 已儲存 → {args.output}")
+
+
+def cmd_router_analyze(args: argparse.Namespace) -> None:
+    from .router import RouterData
+    from .router.dataset_eval import analyze, format_report
+
+    path = Path(args.data)
+    data = RouterData.load(path)
+
+    result = analyze(
+        data,
+        emb_model=args.emb_model,
+        emb_batch_size=args.emb_batch_size,
+        split=args.split,
+    )
+
+    report = format_report(result, title=str(path))
+    print(report)
+
+    if args.output:
+        import json
+        out = {
+            "file": str(path),
+            "split": args.split,
+            "n_train": result.n_train,
+            "n_val": result.n_val,
+            "n_test": result.n_test,
+            "models": result.models,
+            "n_samples": result.n_samples,
+            "avg_sim": result.avg_sim,
+            "dec_var": result.dec_var,
+            "ch_score": result.ch_score,
+            "ssb": result.ssb,
+            "ssw": result.ssw,
+            "n_clusters": result.n_clusters,
+            "is_exclusive": result.is_exclusive,
+            "multi_win_pct": result.multi_win_pct,
+            "win_rates": {m: float(r) for m, r in zip(result.models, result.win_rates)},
+            "model_acc": {m: float(a) for m, a in zip(result.models, result.model_acc)},
+            "emb_source": result.emb_source,
+            "overall_grade": result.overall_grade,
+            "ch_pass": result.ch_pass,
+            "sim_pass": result.sim_pass,
+            "var_pass": result.var_pass,
+            "warnings": result.warnings,
+        }
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+        print(f"\n分析結果已儲存 → {out_path}")
 
 
 def cmd_router_bench(args: argparse.Namespace) -> None:
@@ -493,6 +545,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_preprocess_args(p_rt_prep)
 
+    # router analyze
+    p_rt_analyze = rt_sub.add_parser(
+        "analyze",
+        help="四維根因分析（Technical Report §7）：量化 dataset 的 routing 價值",
+    )
+    p_rt_analyze.add_argument("data", help="RouterData .npz 路徑")
+    p_rt_analyze.add_argument(
+        "--split",
+        choices=["train", "val", "test"],
+        default="train",
+        help="分析哪個 split（預設 train）",
+    )
+    p_rt_analyze.add_argument(
+        "--emb-model",
+        dest="emb_model",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        help="若 .npz 未預存 embedding，用此模型即時計算（預設 sentence-transformers/all-MiniLM-L6-v2）",
+    )
+    p_rt_analyze.add_argument(
+        "--emb-batch-size",
+        dest="emb_batch_size",
+        type=int,
+        default=32,
+        help="embedding 計算 batch size（預設 32）",
+    )
+    p_rt_analyze.add_argument(
+        "--output", "-o",
+        default=None,
+        help="將結構化結果儲存為 JSON 檔案（可選）",
+    )
+
     # router train
     p_rt_train = rt_sub.add_parser("train", help="訓練 router 並儲存")
     p_rt_train.add_argument(
@@ -593,6 +676,8 @@ def main() -> None:
         elif args.command == "router":
             if args.rt_action == "prepare":
                 cmd_router_prepare(mgr, args)
+            elif args.rt_action == "analyze":
+                cmd_router_analyze(args)
             elif args.rt_action == "train":
                 cmd_router_train(args)
             elif args.rt_action == "eval":
@@ -607,6 +692,9 @@ def main() -> None:
     # litellm.Router 會啟動非 daemon 背景 thread（health check、scheduler 等），
     # asyncio.run() 結束後這些 thread 仍存活，導致 process 掛住。
     # 使用 os._exit() 強制結束，避免等待背景 thread。
+    # 注意：os._exit() 在 pipe 模式下不自動 flush，需先手動 flush。
+    sys.stdout.flush()
+    sys.stderr.flush()
     os._exit(0)
 
 
