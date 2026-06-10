@@ -313,7 +313,7 @@ class GRPORouter(BaseRouter):
             # 需要先建立 policy 結構
             num_models = len(router.model_names)
             # 推斷 input_dim（從狀態字典）
-            fc_weight = checkpoint['policy_state'].get('fc1.weight')
+            fc_weight = checkpoint['policy_state'].get('net.0.weight')
             if fc_weight is not None:
                 input_dim = fc_weight.shape[1]
                 router._policy = router._build_policy(input_dim, num_models).to(device)

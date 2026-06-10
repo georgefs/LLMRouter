@@ -59,10 +59,10 @@ class TestDataPreparer:
 
     def test_default_split(self, small_data):
         d = small_data
-        # 60 / 10 / 30 split
+        # 60 / 20 / 20 split → 30 samples: train=18, val=6, test=6
         assert len(d.train_prompt) == 18
-        assert len(d.val_prompt) == 3
-        assert len(d.test_prompt) == 9
+        assert len(d.val_prompt) == 6
+        assert len(d.test_prompt) == 6
 
     def test_models_sorted(self, small_data):
         assert small_data.models == sorted(small_data.models)

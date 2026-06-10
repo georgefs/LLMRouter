@@ -40,7 +40,7 @@ def data():
 class TestSoftmaxEntropy:
     def test_uniform_max_entropy(self):
         probs = np.ones((10, 3))
-        ep = _softmax_entropy(probs, temperature=1.0)
+        ep = _softmax_entropy(probs)
         assert ep == pytest.approx(np.log2(3), abs=1e-5)
 
     def test_deterministic_zero_entropy(self):
