@@ -62,7 +62,7 @@ class TestEvaluate:
     def test_keys(self, data):
         probs = np.ones((len(data.test_prompt), len(data.models)))
         m = evaluate(probs, data)
-        assert set(m.keys()) == {"mu", "vb", "ep", "avg_tokens", "avg_latency"}
+        assert set(m.keys()) == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency"}
 
     def test_oracle_vb_one(self, data):
         """完美預測 → vb=1.0。"""

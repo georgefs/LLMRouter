@@ -1,5 +1,16 @@
 from .data import DataPreparer, RouterData
-from .eval import RouterBenchmark, RunResult, evaluate
+from .eval import (
+    MODEL_PRICING,
+    RouterBenchmark,
+    RunResult,
+    compute_cost,
+    compute_hit_rate,
+    compute_nbs,
+    compute_ter,
+    evaluate,
+    evaluate_full,
+    model_unit_costs,
+)
 from .grpo import GRPORouter
 from .knn import KNNRouter
 from .mf import MFRouter
@@ -15,6 +26,13 @@ __all__ = [
     "RouterData",
     "DataPreparer",
     "evaluate",
+    "evaluate_full",
+    "compute_hit_rate",
+    "compute_cost",
+    "compute_ter",
+    "compute_nbs",
+    "model_unit_costs",
+    "MODEL_PRICING",
     "RunResult",
     "RouterBenchmark",
     "OracleRouter",

@@ -53,10 +53,11 @@ class OracleRouter(BaseRouter):
             avg_latency = float(np.mean(L[np.arange(n), idx]))
 
         return {
-            "mu": mu,
-            "vb": vb,
-            "ep": ep,
-            "avg_tokens": avg_tokens,
+            "mu":          mu,
+            "vb":          vb,
+            "ep":          ep,
+            "hr":          1.0,   # §4.3: Oracle 永遠選最高分 → HR = 1.0
+            "avg_tokens":  avg_tokens,
             "avg_latency": avg_latency,
         }
 
@@ -116,11 +117,15 @@ class RandomRouter(BaseRouter):
         n, m = Y.shape
 
         rng = np.random.default_rng(self.seed)
-        acc_list = []
+        acc_list, hr_list = [], []
+        best = np.max(Y, axis=1)
         for _ in range(1000):
             idx = rng.integers(0, m, size=n)
-            acc_list.append(float(np.mean(Y[np.arange(n), idx])))
+            selected = Y[np.arange(n), idx]
+            acc_list.append(float(np.mean(selected)))
+            hr_list.append(float(np.mean(selected >= best - 1e-9)))
         mu = float(np.mean(acc_list))
+        hr = float(np.mean(hr_list))
 
         oracle = float(np.mean(np.max(Y, axis=1)))
         vb = mu / oracle if oracle > 0 else 0.0
@@ -134,10 +139,11 @@ class RandomRouter(BaseRouter):
         avg_latency = float(np.mean(data.test_time)) if data.test_time is not None else 0.0
 
         return {
-            "mu": mu,
-            "vb": vb,
-            "ep": ep,
-            "avg_tokens": avg_tokens,
+            "mu":          mu,
+            "vb":          vb,
+            "ep":          ep,
+            "hr":          hr,    # §4.3: 1000 次隨機模擬平均命中率
+            "avg_tokens":  avg_tokens,
             "avg_latency": avg_latency,
         }
 
