@@ -6,7 +6,7 @@ LLMRouter 是一個多模型路由系統，可自動選擇最適合的 LLM 來�
 
 **項目時間**: 2026-06-10  
 **項目狀態**: ✅ 已完成  
-**測試覆蓋**: 197/197 通過 (100%)
+**測試覆蓋**: 235/235 通過 (100%)
 
 ---
 
@@ -19,7 +19,7 @@ LLMRouter 是一個多模型路由系統，可自動選擇最適合的 LLM 來�
 4. ✅ 提供完整的配置和文檔
 
 ### 成功指標
-- ✅ 所有單位測試通過（197/197）
+- ✅ 所有單位測試通過（235/235）
 - ✅ 實際工作流演示成功
 - ✅ 協議完全相容 semantic-router
 - ✅ 性能指標達標
@@ -174,6 +174,38 @@ algorithm:
 
 ---
 
+### Phase 7: SemanticAPIRouter（HTTP API 包裝器）
+
+**功能**：
+- `router/semantic_api.py` — 將 semantic-router `POST /api/v1/classify/intent` 包裝成標準 `BaseRouter`
+- `_fit()` 只驗證連線可達性，路由邏輯由 semantic-router 管理
+- `predict_probs()` 回傳一熱機率向量；回應未知模型時 fallback 為均勻分布
+- 在 registry 自登記為 `"semantic_api"`，可直接參與 `evaluate()` benchmark
+
+**測試**：
+- `test_semantic_api_router.py` — 11 個單元測試（mock HTTP server、一熱編碼、fallback、Save/Load、registry）
+
+---
+
+### Phase 8: Dataset 路由可學習性評估（四維根因框架）
+
+**功能**：
+- `router/dataset_eval.py` — 實作 Technical Report §7 四維指標
+  - CH Score（Calinski-Harabasz，label-feature 對齊）
+  - Avg_Sim（embedding 語意凝聚度，Gram 矩陣技巧）
+  - Dec_Var σ²（判別增益，win-rate 變異數）
+  - N（訓練樣本量充足性）
+- `format_report()` — 人類可讀報告，含閾值判斷（GOOD / MARGINAL / POOR）與修復建議
+- `router analyze` CLI 指令，支援 `--split / --emb-model / --output`
+
+**修正**：
+- `os._exit(0)` 在 subprocess pipe 環境中不 flush stdout → 新增 `sys.stdout.flush()` 前置呼叫
+
+**測試**：
+- `test_dataset_eval.py` — 22 個單元測試（四個數學函數 + analyze() + format_report() + CLI smoke test）
+
+---
+
 ## 📊 技術實現
 
 ### 架構
@@ -209,6 +241,7 @@ semantic-router (Port 8899)
 | GRPORouter | Group Relative Policy Optimization | ✅ |
 | OracleRouter | Oracle (評估基準) | ✅ |
 | RandomRouter | Random (評估基準) | ✅ |
+| SemanticAPIRouter | semantic-router HTTP API 包裝器 | ✅ |
 
 ### 關鍵技術特性
 
@@ -239,10 +272,10 @@ semantic-router (Port 8899)
 ### 測試統計
 
 ```
-總計: 197 個測試
-✅ 197 個通過
+總計: 235 個測試
+✅ 235 個通過
 ❌ 0 個失敗
-⏭️ 0 個跳過
+⏭️ 0 個跳過（@live_only 裝飾的整合測試在無 semantic-router 時自動 skip）
 
 通過率: 100%
 ```
@@ -258,9 +291,11 @@ semantic-router (Port 8899)
 | `test_model_binding.py` | 4 | model_names 綁定 / Save-Load |
 | `test_endpoint_server.py` | 9 | HTTP endpoint 功能測試 |
 | `test_endpoint_behavior.py` | 24 | HTTP endpoint 行為契約測試 |
-| `test_integration_workflow.py` | 8 | semantic-router 端到端整合 |
+| `test_integration_workflow.py` | 8 | semantic-router 端到端整合（動態埠） |
 | `test_endpoint_behavior.py (extras)` | 34 | 其餘 eval/misc 測試 |
-| **總計** | **197** | **100% 通過** |
+| `test_semantic_api_router.py` | 11 | SemanticAPIRouter HTTP mock / fallback |
+| `test_dataset_eval.py` | 22 | DatasetAnalyzer 四維指標數學正確性 |
+| **總計** | **235** | **100% 通過** |
 
 ### 實際演示成果
 
@@ -533,7 +568,7 @@ semantic-router 端:
 - **版本**: 1.1.0
 - **日期**: 2026-06-11
 - **狀態**: Production Ready
-- **測試覆蓋**: 100% (197/197)
+- **測試覆蓋**: 100% (235/235)
 
 ---
 

@@ -291,6 +291,54 @@ python3 -m LLMRouter router bench knn \
   --sizes 50,100,200,500
 ```
 
+### router analyze（資料集品質分析）
+
+在訓練 router 之前，先評估資料集是否具備足夠的 routing 價值。
+實作 Technical Report §7 的四維根因分析框架。
+
+```bash
+# 基本分析（若 .npz 已預存 embedding，直接使用；否則自動計算）
+python3 -m LLMRouter router analyze data.npz
+
+# 指定 embedding 模型（.npz 沒有預存 embedding 時）
+python3 -m LLMRouter router analyze data.npz \
+  --emb-model sentence-transformers/all-MiniLM-L6-v2
+
+# 分析 val 或 test split
+python3 -m LLMRouter router analyze data.npz --split val
+
+# 同時輸出結構化 JSON（方便程式化比較）
+python3 -m LLMRouter router analyze data.npz -o result.json
+```
+
+**四個指標與閾值**（出自 Technical Report §8）：
+
+| 優先 | 指標 | 閾值 | 意義 |
+|------|------|------|------|
+| P1 | **CH Score**（Calinski-Harabasz） | > 2.0 | GT labels 在 embedding 空間的可分離性 |
+| P2 | **Avg_Sim**（平均成對 cosine） | > 0.025 | 特徵空間的語意結構 |
+| P3 | **Dec_Var σ²**（模型 win rate 變異數） | > 0.015 | 候選模型間的能力差距 |
+| — | **N**（訓練樣本數） | ≥ 3,000 | 泛化的統計基線 |
+
+**輸出範例**（通過所有閾值）：
+```
+═══════════════════════════════════════════════════════════════
+ Dataset Routing Value Report（技術報告 §7 四維框架）
+═══════════════════════════════════════════════════════════════
+── 四維指標（優先順序由高到低）
+  指標                   數值       閾值    狀態
+  CH Score（P1）       5.6391    > 2.0   ✓ PASS
+  Avg_Sim（P2）        0.0355   > 0.025  ✓ PASS
+  Dec_Var σ²（P3）     0.0584   > 0.015  ✓ PASS
+  N 樣本數              3,479   ≥ 3,000  ✓ 足夠
+
+ 綜合評分：GOOD — 具備高路由價值，適合訓練 SFT+GRPO
+```
+
+**評級**：`GOOD` / `MARGINAL` / `POOR`，附帶具體修復建議。
+
+---
+
 ### Router 類型與參數
 
 | 類型 | 說明 | 主要參數 |
@@ -302,8 +350,11 @@ python3 -m LLMRouter router bench knn \
 | `sw` | Similarity-Weighted Ranking | `--k`, `--temperature` |
 | `roberta` | RoBERTa 多標籤迴歸 | `--roberta-model`, `--epochs` |
 | `grpo` | 強化學習（PPO-clip + Group Relative Advantage） | — |
+| `semantic_api` | 呼叫 semantic-router HTTP API 做路由決策 | `--semantic-api-url`, `--semantic-api-timeout` |
 
 KNN / MF / SW 共用 `--emb-model`（預設 `mixedbread-ai/mxbai-embed-large-v1`）。
+
+`semantic_api` 不做本地訓練，`fit()` 只驗證連線。適合將 semantic-router 的路由邏輯納入 benchmark 比較。
 
 ---
 
@@ -646,13 +697,53 @@ register("my_strategy", lambda args, config: MyAnnotator())
 python3 -m LLMRouter annotation gen <dataset> <model> --strategy my_strategy
 ```
 
+### SemanticAPIRouter
+
+將 semantic-router 的 `POST /api/v1/classify/intent` 包裝成標準 `BaseRouter`，
+可直接與 KNN、MF、SW 等傳統 router 在同一個 benchmark 下比較。
+
+```python
+from LLMRouter.router import SemanticAPIRouter
+
+# fit() 只做連線驗證，不做本地訓練
+router = SemanticAPIRouter(base_url="http://localhost:8080", timeout=10.0)
+router.fit(data)  # data 提供 model_names；API 若不可連則 raise RuntimeError
+
+# 推論：每個 prompt 發一次 HTTP 請求
+probs = router.predict_probs(["What is photosynthesis?"])
+# → one-hot (N, M) 陣列；若 API 回傳未知模型名稱則 fallback 為均勻分布
+
+# 評估（與其他 router 完全相同的 metrics）
+metrics = router.evaluate(data)
+
+# 序列化（不含 local model weights，只儲存 URL + model_names）
+router.save("semantic_api.pkl")
+loaded = SemanticAPIRouter.load("semantic_api.pkl")
+```
+
+**CLI**：
+
+```bash
+# train = 只驗證連線
+python3 -m LLMRouter router train semantic_api \
+  --data data.npz \
+  --semantic-api-url http://localhost:8080 \
+  -o sr.pkl
+
+# eval = 對 test set 發 HTTP 請求並計算 metrics
+python3 -m LLMRouter router eval semantic_api \
+  --data data.npz --model sr.pkl
+```
+
+---
+
 ### Registry 查詢
 
 ```python
 from LLMRouter.router.registry import list_routers
 from LLMRouter.annotator.registry import list_strategies
 
-list_routers()     # ['grpo', 'knn', 'mf', 'oracle', 'random', 'roberta', 'sw']
+list_routers()     # ['grpo', 'knn', 'mf', 'oracle', 'random', 'roberta', 'semantic_api', 'sw']
 list_strategies()  # ['llm', 'official']
 ```
 
@@ -661,18 +752,20 @@ list_strategies()  # ['llm', 'official']
 ## 測試
 
 ```bash
-# 全部測試（197 個）
+# 全部測試（235 個）
 pytest LLMRouter/test/ -v
 
 # 只跑特定模組
-pytest LLMRouter/test/test_manager.py -v        # DatasetManager
-pytest LLMRouter/test/test_router.py -v         # Router 訓練 / 資料處理
-pytest LLMRouter/test/test_annotator.py -v      # Annotator / Scorer
-pytest LLMRouter/test/test_model_binding.py -v  # model_names 綁定 / save-load
-pytest LLMRouter/test/test_endpoint_server.py -v     # HTTP endpoint 功能
-pytest LLMRouter/test/test_endpoint_behavior.py -v   # HTTP endpoint 行為契約
+pytest LLMRouter/test/test_manager.py -v              # DatasetManager
+pytest LLMRouter/test/test_router.py -v               # Router 訓練 / 資料處理
+pytest LLMRouter/test/test_annotator.py -v            # Annotator / Scorer
+pytest LLMRouter/test/test_model_binding.py -v        # model_names 綁定 / save-load / checkpoint
+pytest LLMRouter/test/test_endpoint_server.py -v      # HTTP endpoint 功能
+pytest LLMRouter/test/test_endpoint_behavior.py -v    # HTTP endpoint 行為契約（24 個）
 pytest LLMRouter/test/test_integration_workflow.py -v # semantic-router 整合流程
-pytest LLMRouter/test/test_eval.py -v           # 評估指標函數
+pytest LLMRouter/test/test_eval.py -v                 # 評估指標函數
+pytest LLMRouter/test/test_semantic_api_router.py -v  # SemanticAPIRouter（mock + live）
+pytest LLMRouter/test/test_dataset_eval.py -v         # 四維根因分析框架（22 個）
 ```
 
 ### 測試 Fixtures（conftest.py）

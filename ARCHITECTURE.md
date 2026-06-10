@@ -172,141 +172,152 @@ Error Flow 3: Network Error
 
 ## 📦 組件設計
 
-### 1. BaseRouter (基類)
+### 1. BaseRouter（抽象基類）
 
 ```python
 class BaseRouter(ABC):
-    """
-    所有 router 的基類
-    
-    新增功能:
-    - model_names: List[str] | None
-      自動綁定到訓練數據的模型列表
-    
-    - fit(data: RouterData)
-      訓練時自動綁定 model_names
-      檢查一致性
-    
-    - predict(prompts: List[str]) -> List[str]
-      返回模型名稱列表（不是索引）
-    """
-    
+    """所有 router 的抽象基類。"""
+
     def __init__(self):
         self.model_names: List[str] | None = None
-    
+
     def fit(self, data: RouterData):
-        # 自動綁定
+        # 自動綁定 model_names；重複 fit 時做一致性檢查
         if self.model_names is None:
             self.model_names = data.models.copy()
-        else:
-            # 一致性檢查
-            if self.model_names != data.models:
-                raise ValueError("Model mismatch")
-        
-        # 調用子類實現
+        elif self.model_names != data.models:
+            raise ValueError("Model mismatch")
         self._fit(data)
-    
-    def predict(self, prompts: List[str]) -> List[str]:
-        # 返回模型名稱
-        indices = self.predict_indices(prompts)
-        return [self.model_names[idx] for idx in indices]
-    
-    def save(self, path):
-        # 保存包括 model_names
-        pass
-    
+
+    @abstractmethod
+    def _fit(self, data: RouterData) -> None: ...
+
+    @abstractmethod
+    def predict_probs(self, prompts: List[str]) -> np.ndarray:
+        """回傳 (N, M) 機率矩陣。"""
+
+    @abstractmethod
+    def save(self, path: "str | Path") -> None:
+        """序列化到 .pkl 或目錄。checkpoint 需包含 'router_type' 鍵。"""
+
     @classmethod
-    def load(cls, path):
-        # 加載恢復 model_names
-        pass
+    @abstractmethod
+    def load(cls, path_or_ck: "str | Path | dict") -> "BaseRouter":
+        """從路徑或已載入的 checkpoint dict 還原。"""
 ```
 
-### 2. LLMRouterEndpointServer
+#### 自描述 Checkpoint（Self-Describing Checkpoints）
+
+所有 router 的 `save()` 在 checkpoint dict 中寫入 `"router_type"` 鍵：
+
+```python
+# KNNRouter.save() 內部
+checkpoint = {
+    "router_type": "knn",   # ← 讓 server 無需猜測類型
+    "model_names": self.model_names,
+    ...
+}
+```
+
+`LLMRouterEndpointServer` 只載入一次 pickle，直接從 dict 傳給 `cls.load(ck)`（Single-Load Pattern），省去舊版的二次讀取：
+
+```python
+def _load_router(self):
+    with open(self.router_path, "rb") as f:
+        ck = pickle.load(f)
+    cls = self._detect_type_checkpoint(ck)   # 從 router_type 鍵查 registry
+    self.router = cls.load(ck)               # 不再重讀檔案
+```
+
+---
+
+### 2. Router 類型一覽
+
+| 類型 | 模組 | 訓練方式 | 說明 |
+|------|------|----------|------|
+| `oracle` | `oracle.py` | 無（直接使用 GT） | 上界基準 |
+| `random` | `oracle.py` | 無 | 下界基準 |
+| `knn` | `knn.py` | embedding + KNN | K 近鄰平均分數 |
+| `mf` | `mf.py` | SGD | Matrix Factorization |
+| `sw` | `sw_ranking.py` | embedding + win stats | Similarity-Weighted Ranking |
+| `roberta` | `roberta_mlc.py` | fine-tuning | RoBERTa 多標籤迴歸 |
+| `grpo` | `grpo.py` | RL（PPO-clip） | Group Relative Policy Optimization |
+| `semantic_api` | `semantic_api.py` | 連線驗證（無本地訓練） | 呼叫 semantic-router HTTP API |
+
+#### SemanticAPIRouter
+
+將 semantic-router 的 `POST /api/v1/classify/intent`（Port 8080）包裝成標準 `BaseRouter`，使其可直接參與 benchmark：
+
+```
+User Prompt
+    ↓
+SemanticAPIRouter.predict_probs()
+    ↓  HTTP POST /api/v1/classify/intent
+semantic-router API（Port 8080）
+    ↓  {"recommended_model": "gpt-4"}
+one-hot 機率向量  [0, 1, 0]
+    ↓
+evaluate() → HR / Cost / TER / NBS
+```
+
+- `_fit()` 只驗證連線可達性；模型選擇邏輯由 semantic-router 管理
+- API 回傳未知模型名稱時，fallback 為均勻分布
+- `save()` 只儲存 URL / timeout / model_names，不含 local model weights
+
+---
+
+### 3. LLMRouterEndpointServer
 
 ```python
 class LLMRouterEndpointServer:
-    """
-    HTTP Server 暴露訓練好的 router
-    
-    功能:
-    1. 加載已訓練的 router (.pkl)
-    2. 自動推斷 router 類型
-    3. 提供三個 HTTP 端點
-    4. 並發請求支持
-    """
-    
-    def __init__(self, router_path: str, port: int = 8888):
-        # 1. 加載 router
-        self.router = self._load_router(router_path)
-        
-        # 2. 驗證 model_names
-        assert self.router.model_names is not None
-        
-        # 3. 初始化 HTTP 服務
-        self.server = HTTPServer(("0.0.0.0", port), RouterHandler)
-    
-    def start(self):
-        """啟動 HTTP 伺服器"""
-        self.server.serve_forever()
-    
-    def _load_router(self, path: str):
-        """自動推斷並加載 router"""
-        # 根據 checkpoint 特徵推斷類型
-        if "_nn" in checkpoint:
-            return KNNRouter.load(path)
-        elif "seed" in checkpoint:
-            return RandomRouter.load(path)
-        # ...其他類型
+    def __init__(self, router_path, port=8888, host="0.0.0.0"):
+        self._load_router()     # 單次載入，從 router_type 鍵決定 cls
+
+    def _load_router(self):
+        if self.router_path.is_dir():
+            cls = self._detect_type_dir(self.router_path)  # HuggingFace 格式
+            self.router = cls.load(self.router_path)
+        else:
+            with open(self.router_path, "rb") as f:
+                ck = pickle.load(f)                        # 只載入一次
+            cls = self._detect_type_checkpoint(ck)
+            self.router = cls.load(ck)                     # 傳 dict，不重讀
+
+    def shutdown(self):
+        if self.server:
+            self.server.shutdown()     # 停止 serve_forever()
+            self.server.server_close() # 釋放 socket fd
 ```
 
-### 3. RouterHandler (HTTP Handler)
+**HTTP API**：
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| `POST` | `/route` | `{"query": "..."} → {"selected_model": "gpt-4"}` |
+| `GET` | `/health` | `{"status": "healthy", "router_type": "KNNRouter", "model_count": N}` |
+| `GET` | `/models` | `{"models": [{"name": "gpt-4"}, ...]}` |
+
+---
+
+### 4. DatasetAnalyzer（四維根因框架）
 
 ```python
-class RouterHandler(BaseHTTPRequestHandler):
-    """
-    HTTP 請求處理
-    
-    Endpoints:
-    - POST /route: 路由決策
-    - GET /health: 健康檢查
-    - GET /models: 模型列表
-    """
-    
-    router: Optional[BaseRouter] = None
-    
-    def do_POST(self):
-        if self.path == "/route":
-            # 1. 解析 JSON
-            data = json.loads(self.rfile.read(...))
-            query = data.get("query")
-            
-            # 2. 驗證輸入
-            if not query:
-                return self._send_error(400, "Missing query")
-            
-            # 3. 執行路由
-            selected_model = self.router.predict([query])[0]
-            
-            # 4. 返回結果
-            response = {"selected_model": selected_model}
-            self._send_json(200, response)
-    
-    def do_GET(self):
-        if self.path == "/health":
-            response = {
-                "status": "healthy",
-                "router_type": self.router.__class__.__name__,
-                "model_count": len(self.router.model_names or []),
-            }
-            self._send_json(200, response)
+from LLMRouter.router.dataset_eval import analyze, format_report
 
-        elif self.path == "/route":
-            self._send_json(405, {"error": "Method Not Allowed"})
-
-        elif self.path == "/models":
-            models = [{"name": name} for name in self.router.model_names]
-            self._send_json(200, {"models": models})
+result = analyze(data)        # RouterData → DatasetAnalysisResult
+print(format_report(result))  # 人類可讀報告 + 閾值判斷 + 修復建議
 ```
+
+**四個指標**（Technical Report §7）：
+
+| 優先 | 指標 | 公式 | 閾值 |
+|------|------|------|------|
+| P1 | CH Score | Calinski-Harabasz Index（sklearn） | > 2.0 |
+| P2 | Avg_Sim | `1/(N*(N-1)) * Σ cos(v_i, v_j)` | > 0.025 |
+| P3 | Dec_Var σ² | `1/M * Σ(win_rate_k - mean)²` | > 0.015 |
+| — | N | `len(train_prompt)` | ≥ 3,000 |
+
+評級邏輯：CH fail → **POOR**；Sim / Var fail → **MARGINAL**；全 pass → **GOOD**。
 
 ---
 
@@ -471,7 +482,7 @@ POST /route 總延遲 = 100-200ms
 
 ## 🧪 測試架構
 
-全套測試共 197 個，`pytest LLMRouter/test/ -v` 全部通過。
+全套測試共 235 個，`pytest LLMRouter/test/ -v` 全部通過。
 
 ### 共用 Fixtures（conftest.py）
 
@@ -488,11 +499,13 @@ POST /route 總延遲 = 100-200ms
 ### 單元測試
 
 ```
-test_model_binding.py     model_names 綁定 / Save-Load 完整工作流
-test_router.py            DataPreparer / 各 Router / 評估指標
-test_annotator.py         Scorer registry / Annotator / AnnotationRunner
-test_manager.py           DatasetManager CRUD
-test_eval.py              評估指標函數
+test_model_binding.py       model_names 綁定 / Save-Load 完整工作流
+test_router.py              DataPreparer / 各 Router / 評估指標
+test_annotator.py           Scorer registry / Annotator / AnnotationRunner
+test_manager.py             DatasetManager CRUD
+test_eval.py                評估指標函數
+test_semantic_api_router.py SemanticAPIRouter HTTP mock / 一熱編碼 / fallback（11 個）
+test_dataset_eval.py        DatasetAnalyzer 四維指標數學正確性（22 個）
 ```
 
 ### 行為契約測試（Contract Tests）
@@ -511,8 +524,12 @@ test_endpoint_behavior.py（24 個）
 
 ```
 test_endpoint_server.py       LLMRouterEndpointServer 功能
-test_integration_workflow.py  semantic-router RL-driven 端到端
+test_integration_workflow.py  semantic-router RL-driven 端到端（動態埠，避免與 Envoy 衝突）
 ```
+
+### 動態埠分配
+
+`test_integration_workflow.py` 使用 `_free_port()` 讓系統核心分配可用埠（`socket.bind(("127.0.0.1", 0))`），避免與 semantic-router Envoy proxy（固定 Port 8899）衝突。測試執行期間埠號透過 `server._test_base_url` 傳遞給各 helper method。
 
 ---
 
