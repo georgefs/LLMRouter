@@ -131,9 +131,9 @@ class TestSaveLoad:
             router.save(path)
 
             loaded = KNNRouter.load(path)
-            predictions = loaded.predict(["test query"])
-            assert len(predictions) == 1
-            assert 0 <= predictions[0] < len(loaded.model_names)
+            predictions = loaded.predict_indices(sample_data.test_prompt)
+            assert len(predictions) == len(sample_data.test_prompt)
+            assert all(0 <= idx < len(loaded.model_names) for idx in predictions)
 
     def test_oracle_save_load(self, sample_data):
         """OracleRouter save/load 應保留 model_names"""
@@ -177,9 +177,10 @@ class TestCompleteWorkflow:
         assert router.model_names == sample_data.models
         assert len(router.model_names) == 3
 
-        # 2. 預測（訓練後）
-        pred1 = router.predict(["test1"])
-        assert 0 <= pred1[0] < 3
+        # 2. 預測（訓練後）- 直接返回模型名稱
+        pred1 = router.predict(sample_data.test_prompt)
+        assert len(pred1) == len(sample_data.test_prompt)
+        assert all(model in ["gpt-4", "gpt-3.5-turbo", "claude-3"] for model in pred1)
 
         # 3. 保存
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -192,10 +193,10 @@ class TestCompleteWorkflow:
             assert loaded.model_names == sample_data.models
             assert loaded.k == router.k
 
-            # 5. 預測（載入後）
-            pred2 = loaded.predict(["test2"])
-            assert 0 <= pred2[0] < 3
-            assert loaded.model_names[pred2[0]] in ["gpt-4", "gpt-3.5-turbo", "claude-3"]
+            # 5. 預測（載入後）- 直接返回模型名稱
+            pred2 = loaded.predict(sample_data.test_prompt)
+            assert len(pred2) == len(sample_data.test_prompt)
+            assert all(model in ["gpt-4", "gpt-3.5-turbo", "claude-3"] for model in pred2)
 
     def test_oracle_complete_workflow(self, sample_data):
         """OracleRouter 完整流程"""

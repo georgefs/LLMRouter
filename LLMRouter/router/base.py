@@ -67,9 +67,25 @@ class BaseRouter(ABC):
         分數不必是機率，argmax 將用於選擇模型。
         """
 
-    def predict(self, prompts: List[str]) -> np.ndarray:
-        """回傳每個 prompt 對應的模型 index（shape: (N,)）。"""
+    def predict_indices(self, prompts: List[str]) -> np.ndarray:
+        """
+        回傳每個 prompt 對應的模型索引（shape: (N,)）。
+        內部使用，用於評估。
+        """
         return np.argmax(self.predict_probs(prompts), axis=1)
+
+    def predict(self, prompts: List[str]) -> List[str]:
+        """
+        回傳每個 prompt 對應的模型名稱。
+
+        Returns:
+            List[str]: 模型名稱列表（與 prompts 同長度）
+        """
+        if self.model_names is None:
+            raise RuntimeError("Router must be trained first (model_names not bound)")
+
+        indices = self.predict_indices(prompts)
+        return [self.model_names[idx] for idx in indices]
 
     def _predict_for_eval(self, data: RouterData) -> np.ndarray:
         """
