@@ -33,6 +33,7 @@ class RouterHandler(BaseHTTPRequestHandler):
     """HTTP request handler for router endpoint."""
 
     router: Optional[BaseRouter] = None
+    embedding_model: Optional[str] = None
 
     def do_POST(self):
         """Handle POST requests."""
@@ -73,10 +74,15 @@ class RouterHandler(BaseHTTPRequestHandler):
                 self._send_json(503, {"status": "unavailable", "reason": "Router not initialized"})
             else:
                 response = {
-                    "status": "ok",
+                    "status": "healthy",
                     "router_type": self.router.__class__.__name__,
+                    "model_count": len(self.router.model_names or []),
                 }
+                if self.embedding_model:
+                    response["embedding_model"] = self.embedding_model
                 self._send_json(200, response)
+        elif self.path == "/route":
+            self._send_json(405, {"error": "Method Not Allowed"})
         elif self.path == "/models":
             if self.router is None or self.router.model_names is None:
                 self._send_json(503, {"error": "Router not initialized"})
@@ -119,10 +125,12 @@ class LLMRouterEndpointServer:
         router_path: str | Path,
         port: int = 8888,
         host: str = "0.0.0.0",
+        embedding_model: Optional[str] = None,
     ):
         self.router_path = Path(router_path)
         self.port = port
         self.host = host
+        self.embedding_model = embedding_model
         self.server: Optional[HTTPServer] = None
         self.router: Optional[BaseRouter] = None
 
@@ -189,6 +197,7 @@ class LLMRouterEndpointServer:
     def start(self):
         """Start the HTTP server."""
         RouterHandler.router = self.router
+        RouterHandler.embedding_model = self.embedding_model
         self.server = HTTPServer((self.host, self.port), RouterHandler)
 
         logger.info(f"Router endpoint server listening on {self.host}:{self.port}")

@@ -115,7 +115,7 @@ def test_endpoint_health_check(saved_router):
         data = json.loads(response.read().decode("utf-8"))
 
         assert response.status == 200
-        assert data["status"] == "ok"
+        assert data["status"] == "healthy"
         assert data["router_type"] == "KNNRouter"
     finally:
         server.shutdown()

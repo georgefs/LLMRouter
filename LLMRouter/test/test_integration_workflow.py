@@ -72,7 +72,7 @@ class TestSemanticRouterIntegration:
         """驗證 endpoint 伺服器健康"""
         data = self._call_health()
 
-        assert data["status"] == "ok"
+        assert data["status"] == "healthy"
         assert "router_type" in data
         print(f"✓ Server healthy (router_type={data['router_type']})")
 
