@@ -301,10 +301,9 @@ python3 -m LLMRouter router bench knn \
 | `mf` | Matrix Factorization | `--latent-dim`, `--epochs`, `--lr` |
 | `sw` | Similarity-Weighted Ranking | `--k`, `--temperature` |
 | `roberta` | RoBERTa 多標籤迴歸 | `--roberta-model`, `--epochs` |
+| `grpo` | 強化學習（PPO-clip + Group Relative Advantage） | — |
 
 KNN / MF / SW 共用 `--emb-model`（預設 `mixedbread-ai/mxbai-embed-large-v1`）。
-
-> **GRPORouter**（強化學習，PPO-clip + Group Relative Advantage）已實作於 Python API，尚未整合進 CLI。請見 [Python API → Router — 訓練與評估](#router--訓練與評估)。
 
 ---
 
@@ -606,20 +605,97 @@ sub = data.subsample_train(fraction=0.5, seed=42)
 
 ---
 
+## 擴充指南
+
+### 新增 Router
+
+1. 複製 `LLMRouter/router/_template.py`，將 `MyRouter` / `my_router` 替換為實際名稱。
+2. 實作三個方法：`_fit(data)`、`predict_probs(prompts)`、`save/load`。
+3. 在檔案末尾呼叫 `register()`：
+
+```python
+from .registry import register
+
+register("my_router", MyRouter, lambda a: {"param_a": a.param_a})
+```
+
+完成後不需修改任何其他檔案，CLI 即可辨識：
+
+```bash
+python3 -m LLMRouter router train my_router --data data.npz
+python3 -m LLMRouter router eval  my_router --data data.npz --model r.pkl
+```
+
+若需要新的 CLI 參數，在 `__main__._add_router_args()` 新增 `add_argument()`，並在 `kwargs_fn` 中取用即可。
+
+### 新增 Annotator
+
+1. 複製 `LLMRouter/annotator/_template.py`，替換名稱。
+2. 實作 `annotate(prompt, response, dataset_item) → (score, metadata)`。
+3. 在檔案末尾呼叫 `register()`：
+
+```python
+from .registry import register
+
+register("my_strategy", lambda args, config: MyAnnotator())
+```
+
+完成後：
+
+```bash
+python3 -m LLMRouter annotation gen <dataset> <model> --strategy my_strategy
+```
+
+### Registry 查詢
+
+```python
+from LLMRouter.router.registry import list_routers
+from LLMRouter.annotator.registry import list_strategies
+
+list_routers()     # ['grpo', 'knn', 'mf', 'oracle', 'random', 'roberta', 'sw']
+list_strategies()  # ['llm', 'official']
+```
+
+---
+
 ## 測試
 
 ```bash
-# 全部測試
+# 全部測試（197 個）
 pytest LLMRouter/test/ -v
 
-# 只跑 manager 相關
-pytest LLMRouter/test/test_manager.py -v
+# 只跑特定模組
+pytest LLMRouter/test/test_manager.py -v        # DatasetManager
+pytest LLMRouter/test/test_router.py -v         # Router 訓練 / 資料處理
+pytest LLMRouter/test/test_annotator.py -v      # Annotator / Scorer
+pytest LLMRouter/test/test_model_binding.py -v  # model_names 綁定 / save-load
+pytest LLMRouter/test/test_endpoint_server.py -v     # HTTP endpoint 功能
+pytest LLMRouter/test/test_endpoint_behavior.py -v   # HTTP endpoint 行為契約
+pytest LLMRouter/test/test_integration_workflow.py -v # semantic-router 整合流程
+pytest LLMRouter/test/test_eval.py -v           # 評估指標函數
+```
 
-# 只跑 router 相關
-pytest LLMRouter/test/test_router.py -v
+### 測試 Fixtures（conftest.py）
 
-# 只跑 annotator 相關
-pytest LLMRouter/test/test_annotator.py -v
+`LLMRouter/test/conftest.py` 提供四個共用 fixture，新增測試時直接使用：
+
+| Fixture | Scope | 說明 |
+|---|---|---|
+| `router_data` | session | RouterData 50筆、384-dim 嵌入、seed=42 |
+| `trained_knn` | function | 已訓練的 KNNRouter（k=5） |
+| `saved_router_path` | function | .pkl 暫存路徑，teardown 自動清除 |
+| `live_endpoint` | function | 執行中的 endpoint server，提供 `.base_url` |
+
+```python
+# 使用範例
+def test_my_router(router_data, trained_knn):
+    preds = trained_knn.predict(router_data.test_prompt)
+    assert all(m in trained_knn.model_names for m in preds)
+
+def test_my_endpoint(live_endpoint):
+    import httpx
+    r = httpx.get(f"{live_endpoint.base_url}/health")
+    assert r.json()["status"] == "healthy"
 ```
 
 測試使用 `tmp_path` fixture，不依賴任何外部服務或實際資料。LLM 呼叫透過 `unittest.mock` 模擬。

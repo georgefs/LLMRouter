@@ -46,7 +46,7 @@ python3 LLMRouter/scripts/start_endpoint.py \
 **驗證端點正常**:
 ```bash
 curl http://localhost:8123/health
-# {"status": "ok", "router_type": "KNNRouter"}
+# {"status": "healthy", "router_type": "KNNRouter", "model_count": 3}
 ```
 
 ### 2️⃣ 配置 semantic-router
@@ -96,7 +96,7 @@ print('Gateway:', data[0]['IPAM']['Config'][0]['Gateway'])
 **從容器內驗證連線**:
 ```bash
 docker exec vllm-sr-router-container curl http://<GATEWAY_IP>:8123/health
-# {"status": "ok", "router_type": "KNNRouter"}
+# {"status": "healthy", "router_type": "KNNRouter", "model_count": 3}
 ```
 
 **填入配置**:

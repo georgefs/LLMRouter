@@ -294,11 +294,15 @@ class RouterHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             response = {
-                "status": "ok",
-                "router_type": self.router.__class__.__name__
+                "status": "healthy",
+                "router_type": self.router.__class__.__name__,
+                "model_count": len(self.router.model_names or []),
             }
             self._send_json(200, response)
-        
+
+        elif self.path == "/route":
+            self._send_json(405, {"error": "Method Not Allowed"})
+
         elif self.path == "/models":
             models = [{"name": name} for name in self.router.model_names]
             self._send_json(200, {"models": models})
@@ -467,76 +471,96 @@ POST /route 總延遲 = 100-200ms
 
 ## 🧪 測試架構
 
+全套測試共 197 個，`pytest LLMRouter/test/ -v` 全部通過。
+
+### 共用 Fixtures（conftest.py）
+
+`LLMRouter/test/conftest.py` 提供 session/function 範圍的共用 fixture，
+新增測試直接注入，無需重複定義 setUp 邏輯：
+
+| Fixture | Scope | 內容 |
+|---|---|---|
+| `router_data` | session | RouterData 50筆、384-dim、seed=42 |
+| `trained_knn` | function | 已訓練的 KNNRouter（k=5） |
+| `saved_router_path` | function | .pkl 暫存路徑，teardown 自動清除 |
+| `live_endpoint` | function | 執行中的 endpoint，提供 `.base_url` |
+
 ### 單元測試
 
 ```
-test_model_binding.py
-├─ TestRouterWorkflow
-│  ├─ test_knn_router_workflow
-│  ├─ test_oracle_router_workflow
-│  ├─ test_random_router_workflow
-│  └─ test_model_mismatch_error
-└─ 驗證: Model names 綁定、Save/Load、一致性
+test_model_binding.py     model_names 綁定 / Save-Load 完整工作流
+test_router.py            DataPreparer / 各 Router / 評估指標
+test_annotator.py         Scorer registry / Annotator / AnnotationRunner
+test_manager.py           DatasetManager CRUD
+test_eval.py              評估指標函數
 ```
 
-### 集成測試
+### 行為契約測試（Contract Tests）
 
 ```
-test_endpoint_server.py
-├─ 伺服器啟動和加載
-├─ HTTP 端點功能
-├─ 錯誤處理
-└─ 並發支持
+test_endpoint_behavior.py（24 個）
+├─ TestHealthEndpoint       /health 正常回傳 200、status、model_count
+├─ TestRouteEndpoint        /route POST 回傳 selected_model、結果一致性
+├─ TestProtocolCompliance   Content-Type、必填欄位驗證
+├─ TestEdgeCases            短/長/特殊字符 query、畸形 JSON
+├─ TestPerformance          P50 < 100ms、P99 < 500ms、10 並發
+└─ TestSemanticRouterIntegration  完整 semantic-router 調用流程
 ```
 
-### 端到端測試
+### 整合測試
 
 ```
-test_integration_workflow.py
-├─ semantic-router 協議兼容性
-├─ 實際路由決策
-├─ 並行請求
-└─ 完整工作流
+test_endpoint_server.py       LLMRouterEndpointServer 功能
+test_integration_workflow.py  semantic-router RL-driven 端到端
 ```
 
 ---
 
 ## 📚 擴展點
 
-### 1. 新增 Router 類型
+### 設計原則：Registry 自登記模式
 
-```python
-class MyRouter(BaseRouter):
-    def __init__(self):
-        super().__init__()  # 初始化 model_names
-    
-    def _fit(self, data: RouterData):
-        # 實現訓練邏輯
-        pass
-    
-    def predict_probs(self, prompts: List[str]) -> np.ndarray:
-        # 實現預測邏輯
-        pass
-    
-    def save(self, path):
-        # 實現序列化
-        checkpoint = {
-            'model_names': self.model_names,
-            # ... 其他狀態
-        }
-        pickle.dump(checkpoint, open(path, 'wb'))
-    
-    @classmethod
-    def load(cls, path):
-        # 實現反序列化
-        checkpoint = pickle.load(open(path, 'rb'))
-        router = cls()
-        router.model_names = checkpoint['model_names']
-        # ... 其他恢復
-        return router
+Router 和 Annotator 都採用「模組自登記」設計：
+在各自的實作檔案末尾呼叫 `register()`，
+**無需修改 `__main__.py` 或任何其他檔案**，CLI 即自動感知。
+
+```
+router/registry.py         全域 router registry（name → cls, kwargs_fn）
+annotator/registry.py      全域 annotator registry（strategy → factory_fn）
+router/_template.py        新 router 複製起點
+annotator/_template.py     新 annotator 複製起點
 ```
 
-### 2. 新增 HTTP 端點
+### 1. 新增 Router 類型
+
+複製 `router/_template.py`，實作三個方法後在末尾登記：
+
+```python
+# my_router.py 末尾
+from .registry import register
+
+register("my_router", MyRouter, lambda a: {"param": a.param})
+```
+
+CLI 立即可用，無需其他修改：
+
+```bash
+python3 -m LLMRouter router train my_router --data data.npz
+python3 -m LLMRouter router eval  my_router --data data.npz --model r.pkl
+```
+
+### 2. 新增 Annotator
+
+複製 `annotator/_template.py`，實作 `annotate()` 後登記：
+
+```python
+# my_annotator.py 末尾
+from .registry import register
+
+register("my_strategy", lambda args, config: MyAnnotator())
+```
+
+### 3. 新增 HTTP 端點
 
 ```python
 def do_GET(self):

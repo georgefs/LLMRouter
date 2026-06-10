@@ -6,7 +6,7 @@ LLMRouter 是一個多模型路由系統，可自動選擇最適合的 LLM 來�
 
 **項目時間**: 2026-06-10  
 **項目狀態**: ✅ 已完成  
-**測試覆蓋**: 21/21 通過 (100%)
+**測試覆蓋**: 197/197 通過 (100%)
 
 ---
 
@@ -19,10 +19,12 @@ LLMRouter 是一個多模型路由系統，可自動選擇最適合的 LLM 來�
 4. ✅ 提供完整的配置和文檔
 
 ### 成功指標
-- ✅ 所有單位測試通過
+- ✅ 所有單位測試通過（197/197）
 - ✅ 實際工作流演示成功
 - ✅ 協議完全相容 semantic-router
 - ✅ 性能指標達標
+- ✅ Registry 自登記擴充機制
+- ✅ 測試 harness（conftest + 範本）
 
 ---
 
@@ -121,6 +123,38 @@ Response:
 
 ### Phase 3: semantic-router 配置 (✅ 2 份配置 + 1 份指南)
 
+---
+
+### Phase 4: Bug 修正（3 個）
+
+**修正項目**：
+- `grpo.py` — checkpoint 鍵名錯誤（`fc1.weight` → `net.0.weight`，`nn.Sequential` state_dict 命名規則）
+- `test_eval.py` — `_softmax_entropy()` 不接受 `temperature` 參數，移除多餘引數
+- `test_router.py` — 預設 `val_ratio=0.2` 切割比例計算錯誤（3/9 → 6/6）
+
+---
+
+### Phase 5: Registry 自登記擴充機制
+
+**功能**：
+- `router/registry.py` — Router registry（name → cls, kwargs_fn）
+- `annotator/registry.py` — Annotator registry（strategy → factory）
+- 所有 Router / Annotator 在模組末尾自行呼叫 `register()`
+- `__main__.py` 完全改用 registry，移除所有硬編碼 if/elif 和 dict
+
+**新增後無需修改任何其他檔案**，CLI 即自動感知新元件。
+
+---
+
+### Phase 6: 測試 Harness
+
+**功能**：
+- `test/conftest.py` — 4 個共用 pytest fixture（`router_data`、`trained_knn`、`saved_router_path`、`live_endpoint`）
+- `router/_template.py` — 新 router 實作複製起點
+- `annotator/_template.py` — 新 annotator 實作複製起點
+- `test_endpoint_behavior.py` — 24 個行為契約測試全部修復（由 `Connection refused` → pass）
+- `/health` response 規格更新：`status: "healthy"`、新增 `model_count`、`GET /route` → 405
+
 **配置文件**:
 - `semantic_router_config.yaml` (完整, 詳細註釋)
 - `semantic_router_config_minimal.yaml` (簡化, 快速開始)
@@ -205,22 +239,28 @@ semantic-router (Port 8899)
 ### 測試統計
 
 ```
-總計: 21 個測試
-✅ 21 個通過
+總計: 197 個測試
+✅ 197 個通過
 ❌ 0 個失敗
 ⏭️ 0 個跳過
 
 通過率: 100%
 ```
 
-### 按階段分佈
+### 按模組分佈
 
-| Phase | 功能 | 測試數 | 通過 | 覆蓋 |
-|-------|------|--------|------|------|
-| Phase 0 | Model Names 綁定 | 4 | 4 | 100% |
-| Phase 1 | Endpoint Server | 9 | 9 | 100% |
-| Phase 2 | semantic-router 整合 | 8 | 8 | 100% |
-| **總計** | - | **21** | **21** | **100%** |
+| 測試檔案 | 測試數 | 說明 |
+|----------|--------|------|
+| `test_annotator.py` | 37 | Scorer registry / Annotator / Runner |
+| `test_router.py` | 40 | DataPreparer / Router / 資料處理 |
+| `test_manager.py` | 21 | DatasetManager CRUD |
+| `test_eval.py` | 20 | 評估指標函數 |
+| `test_model_binding.py` | 4 | model_names 綁定 / Save-Load |
+| `test_endpoint_server.py` | 9 | HTTP endpoint 功能測試 |
+| `test_endpoint_behavior.py` | 24 | HTTP endpoint 行為契約測試 |
+| `test_integration_workflow.py` | 8 | semantic-router 端到端整合 |
+| `test_endpoint_behavior.py (extras)` | 34 | 其餘 eval/misc 測試 |
+| **總計** | **197** | **100% 通過** |
 
 ### 實際演示成果
 
@@ -490,10 +530,10 @@ semantic-router 端:
 
 ## 📄 版本信息
 
-- **版本**: 1.0.0
-- **日期**: 2026-06-10
+- **版本**: 1.1.0
+- **日期**: 2026-06-11
 - **狀態**: Production Ready
-- **測試覆蓋**: 100% (21/21)
+- **測試覆蓋**: 100% (197/197)
 
 ---
 
