@@ -145,3 +145,10 @@ class SWRankingRouter(BaseRouter):
 
         print(f"[SW] Loaded from {path}")
         return router
+
+
+from .registry import register
+
+register("sw", SWRankingRouter, lambda a: {
+    "k": a.k, "temperature": a.temperature, "emb_model": a.emb_model,
+})

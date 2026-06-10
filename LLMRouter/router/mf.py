@@ -231,3 +231,11 @@ class MFRouter(BaseRouter):
 
         print(f"[MF] Loaded from {path}")
         return router
+
+
+from .registry import register
+
+register("mf", MFRouter, lambda a: {
+    "latent_dim": a.latent_dim, "epochs": a.epochs,
+    "lr": a.lr, "emb_model": a.emb_model,
+})

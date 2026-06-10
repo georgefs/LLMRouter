@@ -230,3 +230,10 @@ class RoBERTaMLCRouter(BaseRouter):
 
         print(f"[RoBERTa] Loaded from {path}")
         return router
+
+
+from .registry import register
+
+register("roberta", RoBERTaMLCRouter, lambda a: {
+    "model_name": a.roberta_model, "epochs": a.epochs,
+})

@@ -110,24 +110,17 @@ def cmd_annotation_gen(args: argparse.Namespace) -> None:
 
 
 def _build_annotator(args: argparse.Namespace, config: dict):
-    """依 --strategy 建立對應的 annotator 實例。"""
-    strategy = args.strategy
-
-    if strategy == "llm":
-        from .annotator import LLMJudgeAnnotator
-        from litellm import Router
-        if not args.judge:
-            print("錯誤：--strategy llm 需要指定 --judge <model_name>", file=sys.stderr)
-            sys.exit(1)
-        router = Router(model_list=config["model_list"])
-        return LLMJudgeAnnotator(router=router, judge=args.judge)
-
-    if strategy == "official":
-        from .annotator import OfficialAnnotator
-        return OfficialAnnotator()
-
-    print(f"錯誤：未知 strategy '{strategy}'。目前支援：llm, official", file=sys.stderr)
-    sys.exit(1)
+    """依 --strategy 從 registry 建立 annotator 實例。"""
+    from .annotator.registry import build as build_annotator, list_strategies
+    try:
+        return build_annotator(args.strategy, args, config)
+    except KeyError:
+        available = ", ".join(list_strategies()) or "（無）"
+        print(f"錯誤：未知 strategy '{args.strategy}'。已有：{available}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        print(f"錯誤：{e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_router_prepare(mgr: DatasetManager, args: argparse.Namespace) -> None:
@@ -171,15 +164,9 @@ def cmd_router_prepare(mgr: DatasetManager, args: argparse.Namespace) -> None:
     )
 
 
-_ROUTER_TYPES = {
-    "oracle": "OracleRouter",
-    "random": "RandomRouter",
-    "knn": "KNNRouter",
-    "mf": "MFRouter",
-    "sw": "SWRankingRouter",
-    "roberta": "RoBERTaMLCRouter",
-    "grpo": "GRPORouter",
-}
+def _ROUTER_TYPES() -> list[str]:
+    from .router.registry import list_routers
+    return list_routers()
 
 
 def _add_preprocess_args(p: argparse.ArgumentParser) -> None:
@@ -228,24 +215,14 @@ def _preprocess_data(data, args: argparse.Namespace):
 
 def _router_cls_kwargs(router_type: str, args: argparse.Namespace):
     """回傳 (RouterClass, kwargs_dict)，不實例化。"""
-    from . import router as router_mod
-
-    cls = getattr(router_mod, _ROUTER_TYPES[router_type])
-    kwargs: dict = {}
-    if router_type == "knn":
-        kwargs = {"k": args.k, "emb_model": args.emb_model}
-    elif router_type == "mf":
-        kwargs = {
-            "latent_dim": args.latent_dim,
-            "epochs": args.epochs,
-            "lr": args.lr,
-            "emb_model": args.emb_model,
-        }
-    elif router_type == "sw":
-        kwargs = {"k": args.k, "temperature": args.temperature, "emb_model": args.emb_model}
-    elif router_type == "roberta":
-        kwargs = {"model_name": args.roberta_model, "epochs": args.epochs}
-    return cls, kwargs
+    from .router.registry import get as get_router
+    try:
+        cls, kwargs_fn = get_router(router_type)
+    except KeyError:
+        available = ", ".join(_ROUTER_TYPES()) or "（無）"
+        print(f"錯誤：未知 router 類型 '{router_type}'。可用：{available}", file=sys.stderr)
+        sys.exit(1)
+    return cls, kwargs_fn(args)
 
 
 def _build_router(router_type: str, args: argparse.Namespace):
@@ -281,10 +258,11 @@ def cmd_router_bench(args: argparse.Namespace) -> None:
     data = _preprocess_data(data, args)  # 預處理只做一次，之後 subsample 都從乾淨資料來
 
     router_types = [t.strip() for t in args.router_types.split(",") if t.strip()]
+    available = _ROUTER_TYPES()
     for rtype in router_types:
-        if rtype not in _ROUTER_TYPES:
+        if rtype not in available:
             print(
-                f"錯誤：未知 router 類型 '{rtype}'。可用：{', '.join(_ROUTER_TYPES)}",
+                f"錯誤：未知 router 類型 '{rtype}'。可用：{', '.join(available)}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -509,7 +487,7 @@ def build_parser() -> argparse.ArgumentParser:
     # router train
     p_rt_train = rt_sub.add_parser("train", help="訓練 router 並儲存")
     p_rt_train.add_argument(
-        "router_type", choices=list(_ROUTER_TYPES), help="router 類型"
+        "router_type", choices=_ROUTER_TYPES(), help="router 類型"
     )
     p_rt_train.add_argument("--data", required=True, help="RouterData .npz 路徑")
     p_rt_train.add_argument("--output", "-o", default=None, help="儲存 router 的 .pkl 路徑")
@@ -522,7 +500,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_rt_bench.add_argument(
         "router_types",
-        help=f"逗號分隔的 router 類型（e.g. knn 或 knn,mf,oracle）；可用：{','.join(_ROUTER_TYPES)}",
+        help=f"逗號分隔的 router 類型（e.g. knn 或 knn,mf,oracle）；可用：{','.join(_ROUTER_TYPES())}",
     )
     p_rt_bench.add_argument("--data", required=True, help="RouterData .npz 路徑")
     bench_group = p_rt_bench.add_mutually_exclusive_group()
@@ -545,7 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     # router eval
     p_rt_eval = rt_sub.add_parser("eval", help="評估 router 效能")
     p_rt_eval.add_argument(
-        "router_type", choices=list(_ROUTER_TYPES), help="router 類型"
+        "router_type", choices=_ROUTER_TYPES(), help="router 類型"
     )
     p_rt_eval.add_argument("--data", required=True, help="RouterData .npz 路徑")
     p_rt_eval.add_argument("--model", default=None, help="已訓練的 router .pkl 路徑（oracle/random 不需要）")

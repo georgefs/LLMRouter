@@ -176,3 +176,9 @@ class RandomRouter(BaseRouter):
 
         print(f"[Random] Loaded from {path}")
         return router
+
+
+from .registry import register
+
+register("oracle", OracleRouter)
+register("random", RandomRouter)

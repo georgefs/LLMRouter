@@ -134,3 +134,8 @@ class KNNRouter(BaseRouter):
 
         print(f"[KNN] Loaded from {path}")
         return router
+
+
+from .registry import register
+
+register("knn", KNNRouter, lambda a: {"k": a.k, "emb_model": a.emb_model})

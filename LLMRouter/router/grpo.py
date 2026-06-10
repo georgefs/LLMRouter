@@ -322,3 +322,8 @@ class GRPORouter(BaseRouter):
 
         print(f"[GRPO] Loaded from {path}")
         return router
+
+
+from .registry import register
+
+register("grpo", GRPORouter)
