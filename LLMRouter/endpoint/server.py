@@ -218,7 +218,8 @@ class LLMRouterEndpointServer:
             self.shutdown()
 
     def shutdown(self):
-        """Shutdown the server."""
+        """Shutdown the server and close the socket."""
         if self.server:
             self.server.shutdown()
+            self.server.server_close()
             logger.info("Server shut down")
