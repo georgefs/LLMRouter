@@ -153,20 +153,24 @@ bench.print_table(show_cost_metrics=True)
 ### 方向 B：把訓練好的 router 部署給 semantic router 使用
 
 ```bash
-# 啟動 HTTP Endpoint
+# 啟動 HTTP Endpoint（監聽宿主機 port）
 python3 -m LLMRouter.scripts.start_endpoint \
     --router best_router.pkl --port 8888
 ```
 
 ```yaml
 # semantic_router.yaml
+# router_r1_server_url 用宿主機 IP，不能用 localhost
+# （semantic router 以 Docker 部署，容器內 localhost = 容器自身）
 routing:
   rl_driven:
     enabled: true
-    router_r1_server_url: http://localhost:8888
+    router_r1_server_url: http://172.17.0.1:8888   # docker0 bridge IP
     llm_routing_fallback: thompson
     router_r1_timeout: 5
 ```
+
+宿主機 IP 查詢：`ip addr show docker0 | grep 'inet '`；自訂 network 請用 `docker network inspect <name> | grep Gateway`。
 
 ---
 
@@ -254,10 +258,14 @@ bash examples/03_deploy_endpoint.sh
 routing:
   rl_driven:
     enabled: true
-    router_r1_server_url: http://localhost:8888
+    # 使用宿主機 IP，而非 localhost
+    # （semantic router 以 Docker 部署，容器內無法用 localhost 連到宿主機）
+    router_r1_server_url: http://172.17.0.1:8888
     llm_routing_fallback: thompson   # LLMRouter 不可用時自動降級
     router_r1_timeout: 5
 ```
+
+script 會自動偵測宿主機 IP（`docker0` 介面 → 預設路由 → `host.docker.internal`），也可手動覆蓋：`export DOCKER_HOST_IP=<ip>`。
 
 [`examples/03_deploy_endpoint.sh`](examples/03_deploy_endpoint.sh)
 

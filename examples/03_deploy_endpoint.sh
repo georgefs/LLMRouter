@@ -29,6 +29,24 @@ ENDPOINT_PORT="${ENDPOINT_PORT:-8888}"
 ENDPOINT_HOST="${ENDPOINT_HOST:-0.0.0.0}"
 SEMANTIC_CONFIG_OUT="semantic_router.yaml"
 
+# ── 偵測 Docker 容器可到達的宿主機 IP ──────────────────────────────────────
+# semantic router 預設以 Docker 部署，容器內無法用 localhost 連到宿主機 port。
+# 優先序：環境變數 DOCKER_HOST_IP > docker0 介面 > 預設路由 gateway
+if [ -z "${DOCKER_HOST_IP:-}" ]; then
+    # Linux Docker bridge（docker0）
+    DOCKER_HOST_IP=$(ip addr show docker0 2>/dev/null \
+                     | grep -oP 'inet \K[\d.]+' | head -1)
+fi
+if [ -z "${DOCKER_HOST_IP:-}" ]; then
+    # 若使用自訂 network，fallback 到預設路由的 gateway
+    DOCKER_HOST_IP=$(ip route show default 2>/dev/null \
+                     | awk '/default/ {print $3}' | head -1)
+fi
+if [ -z "${DOCKER_HOST_IP:-}" ]; then
+    # Docker Desktop (Mac/Windows) 的特殊 DNS
+    DOCKER_HOST_IP="host.docker.internal"
+fi
+
 step() { echo ""; echo "════════════════════════════════════════════════════"; echo "  $1"; echo "════════════════════════════════════════════════════"; }
 ok()   { echo "  ✓ $1"; }
 warn() { echo "  ⚠ $1"; }
@@ -220,6 +238,10 @@ ok "所有 API 驗證通過"
 # =============================================================================
 step "Step 5 / 7  產生 semantic router config"
 
+echo "  Docker 宿主機 IP：$DOCKER_HOST_IP"
+echo "  （semantic router 以 Docker 部署，需用此 IP 連回宿主機的 endpoint）"
+echo "  如需覆蓋，請設定環境變數：export DOCKER_HOST_IP=<your-host-ip>"
+
 # 從 /health 取得 model 清單
 MODEL_NAMES=$(python3 - <<PYEOF
 import json, urllib.request
@@ -234,8 +256,10 @@ echo "  model 清單：$MODEL_NAMES"
 python3 - <<PYEOF
 import sys
 
-endpoint_port = $ENDPOINT_PORT
-model_names   = "$MODEL_NAMES".split(",")
+endpoint_port   = $ENDPOINT_PORT
+docker_host_ip  = "$DOCKER_HOST_IP"
+model_names     = "$MODEL_NAMES".split(",")
+router_url      = f"http://{docker_host_ip}:{endpoint_port}"
 
 # 產生 YAML model block
 def model_block(name):
@@ -263,9 +287,16 @@ yaml = f"""# ===================================================================
 # 啟動方式：
 #   semantic-router start --config semantic_router.yaml
 #
+# 注意：router_r1_server_url 使用宿主機 IP（{docker_host_ip}），
+#   而非 localhost。原因：semantic router 以 Docker 部署，容器內的
+#   localhost 指向容器自身，無法連到宿主機上的 LLMRouter Endpoint。
+#
+#   如需修改，請設定環境變數後重新產生：
+#     export DOCKER_HOST_IP=<your-host-ip>
+#     bash examples/03_deploy_endpoint.sh
+#
 # 前提：
-#   LLMRouter Endpoint 已在 http://localhost:{endpoint_port} 執行
-#   （執行 03_deploy_endpoint.sh 或 python3 -m LLMRouter.scripts.start_endpoint）
+#   LLMRouter Endpoint 已在宿主機 port {endpoint_port} 執行
 # =============================================================================
 
 version: v0.3
@@ -305,8 +336,9 @@ routing:
 
   rl_driven:
     enabled: true
-    # 指向 LLMRouter Endpoint
-    router_r1_server_url: http://localhost:{endpoint_port}
+    # 宿主機 IP（Docker 容器內需用此位址連回宿主機）
+    # 若使用自訂 Docker network，可能需要調整此 IP
+    router_r1_server_url: {router_url}
     # 若 LLMRouter 不可用，降級為 Thompson Sampling
     llm_routing_fallback: thompson
     # 每次請求 LLMRouter 的 timeout（秒）
@@ -318,7 +350,7 @@ with open("semantic_router.yaml", "w") as f:
 
 print("  已產生 semantic_router.yaml")
 print(f"  模型數：{len(model_names)}")
-print(f"  LLMRouter endpoint：http://localhost:{endpoint_port}")
+print(f"  router_r1_server_url：{router_url}")
 PYEOF
 
 ok "semantic_router.yaml 已產生"
@@ -328,25 +360,28 @@ ok "semantic_router.yaml 已產生"
 # =============================================================================
 step "Step 6 / 7  串接 semantic router（說明）"
 
-cat <<'INFO'
+cat <<INFO
   ─────────────────────────────────────────────────────────
   完整串接流程（兩個 terminal）：
 
-  Terminal 1 — LLMRouter Endpoint（已在背景執行）：
-    python3 -m LLMRouter.scripts.start_endpoint \
-        --router deployed_router.pkl \
-        --port   8888
+  Terminal 1 — LLMRouter Endpoint（已在背景執行，監聽宿主機 port）：
+    python3 -m LLMRouter.scripts.start_endpoint \\
+        --router deployed_router.pkl \\
+        --port   $ENDPOINT_PORT
 
-  Terminal 2 — semantic router：
+  Terminal 2 — semantic router（Docker 部署）：
     semantic-router start --config semantic_router.yaml
+    # semantic_router.yaml 中 router_r1_server_url 已設為
+    # http://$DOCKER_HOST_IP:$ENDPOINT_PORT
+    # Docker 容器透過此 IP 連回宿主機的 LLMRouter Endpoint
 
   驗證串接（Terminal 3）：
     # 健康檢查
     curl http://localhost:8899/health
 
     # 送出查詢（semantic router 會自動呼叫 LLMRouter → 選擇模型）
-    curl -X POST http://localhost:8899/v1/chat/completions \
-      -H "Content-Type: application/json" \
+    curl -X POST http://localhost:8899/v1/chat/completions \\
+      -H "Content-Type: application/json" \\
       -d '{"model": "auto",
            "messages": [{"role": "user", "content": "What is 2+2?"}]}'
 
@@ -355,15 +390,22 @@ cat <<'INFO'
     降級為 Thompson Sampling（llm_routing_fallback: thompson）。
   ─────────────────────────────────────────────────────────
 
-  提示：
-    semantic_router.yaml 中的 BACKEND_BASE_URL / OPENAI_API_KEY
-    可改為環境變數或直接填入實際值。
+  注意事項：
+    1. router_r1_server_url 必須是宿主機 IP，不能用 localhost
+       目前偵測到：$DOCKER_HOST_IP
+       如需手動指定：export DOCKER_HOST_IP=<ip> 後重新執行
 
-    如需持續運行 endpoint（不受 script 結束影響）：
-      nohup python3 -m LLMRouter.scripts.start_endpoint \
-          --router deployed_router.pkl --port 8888 \
-          > endpoint.log 2>&1 &
-      echo "PID: $!"
+    2. 若 semantic router 使用自訂 Docker network（非預設 bridge），
+       宿主機 IP 可能不同，請用以下指令確認：
+         docker network inspect <network-name> | grep Gateway
+
+    3. BACKEND_BASE_URL / OPENAI_API_KEY 請替換為實際值
+
+    4. 持續運行 endpoint（不受 script 結束影響）：
+         nohup python3 -m LLMRouter.scripts.start_endpoint \\
+             --router deployed_router.pkl --port $ENDPOINT_PORT \\
+             > endpoint.log 2>&1 &
+         echo "PID: \$!"
 INFO
 
 # =============================================================================
