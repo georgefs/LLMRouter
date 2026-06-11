@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "LLMRouter"
+version = "0.1.0"
+description = "LLM Router: multi-model routing, evaluation, and benchmarking framework"
+requires-python = ">=3.10"
+
+# Core deps — always needed (eval, dataset management, HTTP endpoint, CLI)
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.11",
+    "scikit-learn>=1.5",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+# KNN / SW / MF / RoBERTa routers + embedding computation
+ml = [
+    "torch>=2.0",
+    "transformers>=4.40",
+    "sentence-transformers>=3.0",
+    "huggingface-hub>=0.20",
+    "tokenizers>=0.19",
+    "safetensors>=0.4",
+]
+
+# LLM inference (response gen) + LLM-as-Judge annotation
+llm = [
+    "litellm>=1.40",
+]
+
+# Test suite
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+# Everything
+all = [
+    "LLMRouter[ml,llm,dev]",
+]
+
+[project.scripts]
+llmrouter = "LLMRouter.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["LLMRouter*"]
+exclude = ["LLMRouter/test*", "LLMRouter/.vllm-sr*"]
+
+[tool.pytest.ini_options]
+testpaths = ["LLMRouter/test"]
+asyncio_mode = "auto"
