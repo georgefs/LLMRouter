@@ -192,6 +192,98 @@ python3 -m LLMRouter.scripts.analyze_datasets \
 
 ---
 
+## 情景範例
+
+詳細說明與完整驗證 script 存放於 [`examples/`](examples/)。
+
+---
+
+### 情景 1 — 從零開始：inference → 訓練 → benchmark
+
+**適用時機**：手上只有 dataset，要從頭跑完整個 pipeline。
+
+涵蓋 inference、LLM-as-Judge annotation、§7 資料集品質檢查（CH Score < 2 時警告）、RouterData 打包（含預存 embedding）、多 router 橫向對比、儲存最終 router。
+
+```bash
+export DATASETS=mmlu_pro_test
+export MODELS="gpt-oss-20b,Microsoft-Phi-4,Google-Gemma-3-27B"
+export JUDGE=gpt-oss-120b
+bash examples/01_full_workflow.sh
+```
+
+→ 產出：`data.npz`、`best_router.pkl`、`dataset_analysis.csv`
+
+[`examples/01_full_workflow.sh`](examples/01_full_workflow.sh)
+
+---
+
+### 情景 2 — 批次評估多個資料集的 routing 價值
+
+**適用時機**：有多個 dataset，要決定哪些值得投入訓練資源。
+
+批次計算四維指標、自動分類 GOOD / MARGINAL / POOR、輸出診斷報告與 CSV，並驗證 grade 與數值一致性。
+
+```bash
+export DATASETS=mmlu_pro_test,arc_challenge,gpqa_diamond
+export MODELS="gpt-oss-20b,Microsoft-Phi-4,Google-Gemma-3-27B"
+bash examples/02_dataset_analysis.sh
+# → analysis_results.csv + analysis_results.json
+```
+
+POOR 的資料集：CH Score 低 → router 在 embedding 空間找不到可分離的決策邊界，訓練成果不會比 random 好。優先修復資料集（換 embedding 模型、擴大樣本、調整模型池），再投入訓練。
+
+[`examples/02_dataset_analysis.sh`](examples/02_dataset_analysis.sh)
+
+---
+
+### 情景 3 — 訓練 router → 部署 endpoint → 串接 semantic router
+
+**適用時機**：已有 RouterData，要把 router 部署給 semantic router 作為 `rl_driven` 決策引擎。
+
+訓練 KNN router → 啟動 HTTP endpoint → 驗證 `/health` / `/models` / `/route` API → 自動產生 `semantic_router.yaml`。
+
+```bash
+export DATA_NPZ=data.npz
+bash examples/03_deploy_endpoint.sh
+# → deployed_router.pkl + semantic_router.yaml
+```
+
+產生的 config 直接可用：
+
+```yaml
+routing:
+  rl_driven:
+    enabled: true
+    router_r1_server_url: http://localhost:8888
+    llm_routing_fallback: thompson   # LLMRouter 不可用時自動降級
+    router_r1_timeout: 5
+```
+
+[`examples/03_deploy_endpoint.sh`](examples/03_deploy_endpoint.sh)
+
+---
+
+### 情景 4 — 把 semantic router 納入橫向評估
+
+**適用時機**：semantic router 已在運行，想知道它的路由品質相對於 oracle / random / KNN 落在哪裡。
+
+`SemanticAPIRouter` 把 `POST /api/v1/classify/intent` 包成 `BaseRouter`，可直接放進 `RouterBenchmark` 與其他 router 並排比較。內建 mock server，無需真實 semantic router 即可驗證流程。
+
+```bash
+export DATA_NPZ=data.npz
+export SR_BASE_URL=http://localhost:8080   # 若未運行，script 自動啟動 mock
+bash examples/04_semantic_api_router.sh
+```
+
+結果解讀：
+- HR 明顯高於 random → semantic router RL 訓練有效
+- HR 接近 random → 需要更多 feedback 資料
+- HR 接近 oracle → 考慮直接用它，不需額外訓練本地 router
+
+[`examples/04_semantic_api_router.sh`](examples/04_semantic_api_router.sh)
+
+---
+
 ## 文件
 
 | 文件 | 內容 |
