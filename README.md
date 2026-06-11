@@ -212,12 +212,12 @@ python3 -m LLMRouter.scripts.analyze_datasets \
 export DATASETS=mmlu_pro_test
 export MODELS="gpt-oss-20b,Microsoft-Phi-4,Google-Gemma-3-27B"
 export JUDGE=gpt-oss-120b
-bash examples/01_full_workflow.sh
+bash examples/01_full_workflow/run.sh
 ```
 
 → 產出：`data.npz`、`best_router.pkl`、`dataset_analysis.csv`
 
-[`examples/01_full_workflow.sh`](examples/01_full_workflow.sh)
+[`examples/01_full_workflow/run.sh`](examples/01_full_workflow/run.sh)
 
 ---
 
@@ -230,13 +230,13 @@ bash examples/01_full_workflow.sh
 ```bash
 export DATASETS=mmlu_pro_test,arc_challenge,gpqa_diamond
 export MODELS="gpt-oss-20b,Microsoft-Phi-4,Google-Gemma-3-27B"
-bash examples/02_dataset_analysis.sh
+bash examples/02_dataset_analysis/run.sh
 # → analysis_results.csv + analysis_results.json
 ```
 
 POOR 的資料集：CH Score 低 → router 在 embedding 空間找不到可分離的決策邊界，訓練成果不會比 random 好。優先修復資料集（換 embedding 模型、擴大樣本、調整模型池），再投入訓練。
 
-[`examples/02_dataset_analysis.sh`](examples/02_dataset_analysis.sh)
+[`examples/02_dataset_analysis/run.sh`](examples/02_dataset_analysis/run.sh)
 
 ---
 
@@ -248,7 +248,7 @@ POOR 的資料集：CH Score 低 → router 在 embedding 空間找不到可分�
 
 ```bash
 export DATA_NPZ=data.npz
-bash examples/03_deploy_endpoint.sh
+bash examples/03_deploy_endpoint/run.sh
 # → deployed_router.pkl + semantic_router.yaml
 ```
 
@@ -267,7 +267,7 @@ routing:
 
 script 會自動偵測宿主機 IP（`docker0` 介面 → 預設路由 → `host.docker.internal`），也可手動覆蓋：`export DOCKER_HOST_IP=<ip>`。
 
-[`examples/03_deploy_endpoint.sh`](examples/03_deploy_endpoint.sh)
+[`examples/03_deploy_endpoint/run.sh`](examples/03_deploy_endpoint/run.sh)
 
 ---
 
@@ -280,7 +280,7 @@ script 會自動偵測宿主機 IP（`docker0` 介面 → 預設路由 → `host
 ```bash
 export DATA_NPZ=data.npz
 export SR_BASE_URL=http://localhost:8080   # 若未運行，script 自動啟動 mock
-bash examples/04_semantic_api_router.sh
+bash examples/04_semantic_api_router/run.sh
 ```
 
 結果解讀：
@@ -288,7 +288,7 @@ bash examples/04_semantic_api_router.sh
 - HR 接近 random → 需要更多 feedback 資料
 - HR 接近 oracle → 考慮直接用它，不需額外訓練本地 router
 
-[`examples/04_semantic_api_router.sh`](examples/04_semantic_api_router.sh)
+[`examples/04_semantic_api_router/run.sh`](examples/04_semantic_api_router/run.sh)
 
 ---
 
