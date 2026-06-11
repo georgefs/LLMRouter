@@ -241,7 +241,8 @@ def _load_router(self):
 | `mf` | `mf.py` | SGD | Matrix Factorization |
 | `sw` | `sw_ranking.py` | embedding + win stats | Similarity-Weighted Ranking |
 | `roberta` | `roberta_mlc.py` | fine-tuning | RoBERTa 多標籤迴歸 |
-| `grpo` | `grpo.py` | RL（PPO-clip） | Group Relative Policy Optimization |
+| `grpo` | `grpo.py` | RL（PPO-clip） | Group Relative Policy Optimization（embedding-based） |
+| `sft_grpo` | `sft_grpo.py` | SFT → GRPO（unsloth/trl） | LLM-based：Qwen2.5-3B + LoRA，cost-aware reward；需 CUDA |
 | `semantic_api` | `semantic_api.py` | 連線驗證（無本地訓練） | 呼叫 semantic-router HTTP API |
 
 #### SemanticAPIRouter
@@ -307,6 +308,16 @@ from LLMRouter.router.dataset_eval import analyze, format_report
 result = analyze(data)        # RouterData → DatasetAnalysisResult
 print(format_report(result))  # 人類可讀報告 + 閾值判斷 + 修復建議
 ```
+
+批次分析多個 dataset（直接從資料庫撈取）：
+
+```bash
+python -m LLMRouter.scripts.analyze_datasets \
+  --datasets ds1,ds2,ds3 --models m1,m2 --strategy llm \
+  [--detail] [--output results.csv]
+```
+
+輸出橫向對比表，每欄標示 ✓/✗，末欄給 GOOD / MARGINAL / POOR 綜合評級。
 
 **四個指標**（Technical Report §7）：
 
@@ -482,7 +493,7 @@ POST /route 總延遲 = 100-200ms
 
 ## 🧪 測試架構
 
-全套測試共 235 個，`pytest LLMRouter/test/ -v` 全部通過。
+全套測試共 273 個，`pytest LLMRouter/test/ -v` 全部通過。
 
 ### 共用 Fixtures（conftest.py）
 
@@ -506,6 +517,7 @@ test_manager.py             DatasetManager CRUD
 test_eval.py                評估指標函數
 test_semantic_api_router.py SemanticAPIRouter HTTP mock / 一熱編碼 / fallback（11 個）
 test_dataset_eval.py        DatasetAnalyzer 四維指標數學正確性（22 個）
+test_eval_metrics.py        §4.3 HR / Cost / TER / NBS 數學正確性
 ```
 
 ### 行為契約測試（Contract Tests）
