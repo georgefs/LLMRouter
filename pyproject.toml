@@ -40,9 +40,16 @@ dev = [
     "pytest-asyncio>=0.23",
 ]
 
+# SFT+GRPO LLM router (Qwen2.5 + LoRA)
+rl = [
+    "unsloth>=2024.12.0",
+    "trl>=0.17",
+    "datasets>=2.0",
+]
+
 # Everything
 all = [
-    "LLMRouter[ml,llm,dev]",
+    "LLMRouter[ml,llm,dev,rl]",
 ]
 
 [project.scripts]

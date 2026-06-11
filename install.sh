@@ -10,7 +10,9 @@
 #           （KNN / SW-Ranking / MatrixFactorization / RoBERTa router）
 #   llm   — core + litellm
 #           （LLM inference、LLM-as-Judge annotation）
-#   all   — core + ml + llm + dev（完整環境）
+#   rl    — core + unsloth + trl + datasets
+#           （SFT+GRPO LLM router，需要 CUDA）
+#   all   — core + ml + llm + rl + dev（完整環境）
 #   dev   — all + pytest（開發 / CI 環境）
 #
 # 環境變數:
@@ -59,8 +61,14 @@ case "$PROFILE" in
         "$PYTHON" -m pip install --upgrade pip
         "$PYTHON" -m pip install -e ".[llm]"
         ;;
+    rl)
+        echo "安裝 profile: rl（core + unsloth + trl + datasets）"
+        echo "  注意：unsloth 需要 CUDA；首次安裝請見 https://docs.unsloth.ai/"
+        "$PYTHON" -m pip install --upgrade pip
+        "$PYTHON" -m pip install -e ".[rl]"
+        ;;
     all)
-        echo "安裝 profile: all（core + ml + llm + dev）"
+        echo "安裝 profile: all（core + ml + llm + rl + dev）"
         "$PYTHON" -m pip install --upgrade pip
         "$PYTHON" -m pip install -e ".[all]"
         ;;
@@ -71,7 +79,7 @@ case "$PROFILE" in
         ;;
     *)
         echo "未知 profile: $PROFILE" >&2
-        echo "用法: $0 [core|ml|llm|all|dev]" >&2
+        echo "用法: $0 [core|ml|llm|rl|all|dev]" >&2
         exit 1
         ;;
 esac
