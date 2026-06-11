@@ -100,9 +100,9 @@ python3 -m LLMRouter.scripts.analyze_datasets \
 
 ok "分析結果 → $ANALYSIS_CSV"
 
-if python3 - <<'PYEOF'
-import csv, sys
-poor = [r["dataset"] for r in csv.DictReader(open("'"$ANALYSIS_CSV"'"))
+if ANALYSIS_CSV="$ANALYSIS_CSV" python3 - <<'PYEOF'
+import csv, sys, os
+poor = [r["dataset"] for r in csv.DictReader(open(os.environ["ANALYSIS_CSV"]))
         if r.get("grade") == "POOR"]
 if poor:
     print(f"  [!!] POOR 評級資料集（routing 訓練效果不佳）：{poor}")
@@ -135,12 +135,12 @@ python3 - <<PYEOF
 import numpy as np, sys
 d = np.load("$DATA_NPZ", allow_pickle=True)
 missing = [k for k in ("train_prompt","val_prompt","test_prompt",
-                        "train_score","test_score","model_names")
+                        "train_score","test_score","model")
            if k not in d]
 if missing:
     print(f"  [ERR] RouterData 缺欄位：{missing}", file=sys.stderr); sys.exit(1)
 print(f"  train={len(d['train_prompt'])}  test={len(d['test_prompt'])}"
-      f"  models={list(d['model_names'])}")
+      f"  models={list(d['model'])}")
 print(f"  embedding 預存：{'是' if 'train_embed' in d else '否'}")
 PYEOF
 

@@ -397,7 +397,11 @@ class RouterBenchmark:
 
                 # Oracle / Random override predict_probs → 使用各自的 evaluate(data)
                 try:
-                    probs = r.predict_probs(data.test_prompt)
+                    # 若 router 有 _predict_for_eval，優先用它（可利用預存 embedding）
+                    if hasattr(r, "_predict_for_eval"):
+                        probs = r._predict_for_eval(data)
+                    else:
+                        probs = r.predict_probs(data.test_prompt)
                     metrics = evaluate_full(
                         probs, data,
                         model_costs=model_costs,

@@ -84,9 +84,9 @@ ok "分類完成"
 # =============================================================================
 step "Step 3 / 4  完整診斷報告（GOOD + MARGINAL）"
 
-DETAIL_DATASETS=$(python3 - <<'PYEOF'
-import json
-with open("'"$OUTPUT_JSON"'") as f:
+DETAIL_DATASETS=$(OUTPUT_JSON="$OUTPUT_JSON" python3 - <<'PYEOF'
+import json, os
+with open(os.environ["OUTPUT_JSON"]) as f:
     results = json.load(f)
 keep = results.get("GOOD", []) + results.get("MARGINAL", [])
 print(",".join(r["dataset"] for r in keep))
@@ -116,13 +116,14 @@ ok "診斷報告完成"
 # =============================================================================
 step "Step 4 / 4  驗證指標數值合理性"
 
-python3 - <<'PYEOF'
-import csv, sys
+OUTPUT_CSV="$OUTPUT_CSV" python3 - <<'PYEOF'
+import csv, sys, os
 
 THRESHOLDS = {"ch_score": 2.0, "avg_sim": 0.025, "dec_var": 0.015}
+csv_path = os.environ["OUTPUT_CSV"]
 errors = []
 
-with open("'"$OUTPUT_CSV"'") as f:
+with open(csv_path) as f:
     for row in csv.DictReader(f):
         ds  = row["dataset"]
         ch  = float(row["ch_score"] or 0)
@@ -130,10 +131,10 @@ with open("'"$OUTPUT_CSV"'") as f:
         var = float(row["dec_var"]  or 0)
         n   = int(row["n_samples"]  or 0)
 
-        if not (ch  >= 0):        errors.append(f"{ds}: CH Score 異常（{ch}）")
-        if not (0 <= sim <= 1):   errors.append(f"{ds}: Avg_Sim 超出範圍（{sim:.4f}）")
-        if not (0 <= var <= 0.25):errors.append(f"{ds}: Dec_Var 超出範圍（{var:.4f}）")
-        if n <= 0:                 errors.append(f"{ds}: 樣本數為 0")
+        if not (ch  >= 0):         errors.append(f"{ds}: CH Score 異常（{ch}）")
+        if not (0 <= sim <= 1):    errors.append(f"{ds}: Avg_Sim 超出範圍（{sim:.4f}）")
+        if not (0 <= var <= 0.25): errors.append(f"{ds}: Dec_Var 超出範圍（{var:.4f}）")
+        if n <= 0:                  errors.append(f"{ds}: 樣本數為 0")
 
         expected = (
             "POOR"     if ch  < THRESHOLDS["ch_score"] else
@@ -148,7 +149,7 @@ if errors:
     for e in errors: print(f"    • {e}")
     sys.exit(1)
 
-total = sum(1 for _ in open("'"$OUTPUT_CSV"'")) - 1
+total = sum(1 for _ in open(csv_path)) - 1
 print(f"\n  ✓ 所有指標驗證通過（{total} 筆）")
 PYEOF
 

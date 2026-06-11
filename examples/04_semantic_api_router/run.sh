@@ -49,19 +49,28 @@ if curl -sf "$SR_BASE_URL/api/v1/classify/intent" \
 else
     warn "semantic router 未在 $SR_BASE_URL 運行，啟動 mock server..."
 
+    # 從 SR_BASE_URL 解析 port（預設 8080）
+    MOCK_PORT=$(python3 -c "from urllib.parse import urlparse; print(urlparse('$SR_BASE_URL').port or 8080)")
+
+    # 若 port 已佔用則找下一個可用 port
+    while ss -tlnp "sport = :$MOCK_PORT" 2>/dev/null | grep -q LISTEN; do
+        MOCK_PORT=$((MOCK_PORT + 1))
+    done
+
     # 取得模型清單供 mock 使用
     MOCK_MODELS=$(python3 - <<PYEOF
 import numpy as np
 d = np.load("$DATA_NPZ", allow_pickle=True)
-print(",".join(d["model_names"]))
+print(",".join(d["model"]))
 PYEOF
 )
 
-    python3 - <<PYEOF &
-import json, random
+    MOCK_PORT_VAL="$MOCK_PORT" python3 - <<PYEOF &
+import json, random, os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 MODEL_NAMES = "$MOCK_MODELS".split(",")
+PORT = int(os.environ["MOCK_PORT_VAL"])
 
 class MockHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args): pass
@@ -83,10 +92,10 @@ class MockHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(resp)
 
-HTTPServer(("0.0.0.0", 8080), MockHandler).serve_forever()
+HTTPServer(("0.0.0.0", PORT), MockHandler).serve_forever()
 PYEOF
     MOCK_PID=$!
-    SR_BASE_URL="http://localhost:8080"
+    SR_BASE_URL="http://localhost:$MOCK_PORT"
     sleep 2
 
     curl -sf "$SR_BASE_URL/api/v1/classify/intent" \
@@ -175,7 +184,7 @@ from LLMRouter.router import (
 data  = RouterData.load("$DATA_NPZ")
 bench = RouterBenchmark(data)
 print(f"\n  RouterData: train={len(data.train_prompt)}  test={len(data.test_prompt)}")
-print(f"  模型池: {data.model_names}")
+print(f"  模型池: {data.models}")
 
 bench.run(OracleRouter,    label="oracle")
 bench.run(RandomRouter,    label="random")
@@ -208,13 +217,13 @@ sr    = SemanticAPIRouter.load("$SR_ROUTER_PKL")
 probs = np.asarray(sr.predict_probs(data.test_prompt[:10]))
 n, m  = probs.shape
 
-assert probs.shape == (10, len(data.model_names)), \
+assert probs.shape == (10, len(data.models)), \
     f"shape 錯誤：{probs.shape}"
 for i, row in enumerate(probs):
     assert row.sum() == 1.0 and row.max() == 1.0, f"row {i} 不是 one-hot"
 
 print(f"  ✓ shape={probs.shape}  one-hot 格式正確")
-counts = {data.model_names[i]: int((np.argmax(probs,1)==i).sum()) for i in range(m)}
+counts = {data.models[i]: int((np.argmax(probs,1)==i).sum()) for i in range(m)}
 print(f"  各模型被選次數（10 筆）：{counts}")
 PYEOF
 

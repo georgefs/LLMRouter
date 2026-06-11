@@ -6,11 +6,14 @@
 #   DATASETS=my_dataset bash run.sh
 # =============================================================================
 
+# LLMRouter 資料根目錄
+export DATA_PATH="${DATA_PATH:-/home/george/work2/delta/test/LLMRouter/datasets}"
+
 # LLMRouter config.yaml 路徑（相對於 repo 根目錄，或絕對路徑）
 export CONFIG="${CONFIG:-config.yaml}"
 
 # 評測資料集（逗號分隔）
-export DATASETS="${DATASETS:-mmlu_pro_test}"
+export DATASETS="${DATASETS:-arc_challenge_train}"
 
 # 候選模型（逗號分隔）
 export MODELS="${MODELS:-gpt-oss-20b,Microsoft-Phi-4,Google-Gemma-3-27B}"

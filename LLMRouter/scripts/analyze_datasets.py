@@ -134,12 +134,10 @@ def analyze_one(
     from LLMRouter.router.dataset_eval import analyze, format_report
 
     # ── DatasetManager ────────────────────────────────────────────────────────
-    if config_path:
-        mgr = DatasetManager.from_config(config_path)
-    elif base_path:
-        mgr = DatasetManager(base_path)
-    else:
-        mgr = DatasetManager.auto()
+    import os
+    from LLMRouter.scorer import FieldScorer
+    mgr = DatasetManager(base_path or os.environ.get("DATA_PATH"))
+    scorer_obj = FieldScorer(scorer) if isinstance(scorer, str) else scorer
 
     # ── 資料 ──────────────────────────────────────────────────────────────────
     print(f"\n[{dataset_name}] 準備資料…", flush=True)
@@ -148,12 +146,12 @@ def analyze_one(
         datasets=[dataset_name],
         models=models,
         strategies=[strategy],
-        scorer=scorer,
+        scorer=scorer_obj,
         train_ratio=train_ratio,
         val_ratio=val_ratio,
         seed=seed,
     )
-    model_names = list(data.model_names)
+    model_names = list(data.models)
     print(f"[{dataset_name}] train={len(data.train_prompt)}  "
           f"val={len(data.val_prompt)}  test={len(data.test_prompt)}")
 

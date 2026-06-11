@@ -4,6 +4,9 @@
 # 修改此檔案後執行 ./run.sh
 # =============================================================================
 
+# LLMRouter 資料根目錄
+export DATA_PATH="${DATA_PATH:-/home/george/work2/delta/test/LLMRouter/datasets}"
+
 # RouterData .npz（由 01_full_workflow 產生）
 export DATA_NPZ="${DATA_NPZ:-../01_full_workflow/data.npz}"
 

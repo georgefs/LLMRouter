@@ -4,8 +4,11 @@
 # 修改此檔案後執行 ./run.sh
 # =============================================================================
 
+# LLMRouter 資料根目錄
+export DATA_PATH="${DATA_PATH:-/home/george/work2/delta/test/LLMRouter/datasets}"
+
 # 要分析的資料集（逗號分隔）
-export DATASETS="${DATASETS:-mmlu_pro_test,arc_challenge,gpqa_diamond}"
+export DATASETS="${DATASETS:-arc_challenge_train}"
 
 # 候選模型（逗號分隔）
 export MODELS="${MODELS:-gpt-oss-20b,Microsoft-Phi-4,Google-Gemma-3-27B}"
