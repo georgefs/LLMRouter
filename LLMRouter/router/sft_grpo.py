@@ -388,6 +388,12 @@ class SFTGRPORouter(BaseRouter):
         model.save_pretrained(final)
         tokenizer.save_pretrained(final)
         print(f"[SFT-GRPO] SFT done → {final}")
+
+        del trainer
+        gc.collect()
+        import torch
+        torch.cuda.empty_cache()
+
         return model, tokenizer
 
     # ── GRPO phase ────────────────────────────────────────────────────────────
