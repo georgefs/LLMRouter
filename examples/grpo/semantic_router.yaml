@@ -1,0 +1,147 @@
+# RL-driven model selection deployment example.
+#
+# This file is a deployable `vllm-sr serve --config` example for online
+# exploration and personalization with the current router config surface.
+
+version: v0.3
+
+listeners:
+  - name: "model-selection-http"
+    address: "0.0.0.0"
+    port: 8899
+    timeout: "60s"
+
+providers:
+  defaults:
+    default_model: "Google-Gemma-3-27B"
+  models:
+    - name: "Google-Gemma-3-27B"
+      provider_model_id: "Google-Gemma-3-27B"
+      pricing:
+        currency: USD
+        prompt_per_1m: 0.04
+      backend_refs:
+        - name: "primary"
+          weight: 100
+          endpoint: "host.docker.internal:4000/v1"
+          protocol: "http"
+    - name: "gpt-oss-20b"
+      provider_model_id: "gpt-oss-20b"
+      pricing:
+        currency: USD
+        prompt_per_1m: 0.03
+      backend_refs:
+        - name: "primary"
+          weight: 100
+          endpoint: "host.docker.internal:4000/v1"
+          protocol: "http"
+    - name: "Llama-4-Maverick-17B-128E-Instruct-FP8"
+      provider_model_id: "Llama-4-Maverick-17B-128E-Instruct-FP8"
+      pricing:
+        currency: USD
+        prompt_per_1m: 0.15
+      backend_refs:
+        - name: "primary"
+          weight: 100
+          endpoint: "host.docker.internal:4000/v1"
+          protocol: "http"
+    - name: "Llama-4-Scout-17B-16E-Instruct-FP8"
+      provider_model_id: "Llama-4-Scout-17B-16E-Instruct-FP8"
+      pricing:
+        currency: USD
+        prompt_per_1m: 0.27
+      backend_refs:
+        - name: "primary"
+          weight: 100
+          endpoint: "host.docker.internal:4000/v1"
+          protocol: "http"
+    - name: "Microsoft-Phi-4"
+      provider_model_id: "Microsoft-Phi-4"
+      pricing:
+        currency: USD
+        prompt_per_1m: 0.06
+      backend_refs:
+        - name: "primary"
+          weight: 100
+          endpoint: "host.docker.internal:4000/v1"
+          protocol: "http"
+    - name: "Mistral-Small-3.1-24B-Instruct-2503"
+      provider_model_id: "Mistral-Small-3.1-24B-Instruct-2503"
+      pricing:
+        currency: USD
+        prompt_per_1m: 0.34
+      backend_refs:
+        - name: "primary"
+          weight: 100
+          endpoint: "host.docker.internal:4000/v1"
+          protocol: "http"
+
+routing:
+  modelCards:
+    - name: "Google-Gemma-3-27B"
+      modality: "text"
+    - name: "gpt-oss-20b"
+      modality: "text"
+    - name: "Llama-4-Maverick-17B-128E-Instruct-FP8"
+      modality: "text"
+    - name: "Llama-4-Scout-17B-16E-Instruct-FP8"
+      modality: "text"
+    - name: "Microsoft-Phi-4"
+      modality: "text"
+    - name: "Mistral-Small-3.1-24B-Instruct-2503"
+      modality: "text"
+  decisions:
+    - name: "default-route"
+      description: "Default route that explores and personalizes model choice"
+      priority: 100
+      rules:
+        operator: "AND"
+        conditions: []
+      algorithm:
+        type: rl_driven
+        rl_driven:
+          exploration_rate: 0.3
+          exploration_decay: 0.99
+          min_exploration: 0.05
+          use_thompson_sampling: true
+          enable_personalization: true
+          personalization_blend: 0.7
+          session_context_weight: 0.3
+          implicit_feedback_weight: 0.5
+          cost_awareness: true
+          cost_weight: 0.2
+          storage_path: state/rl_state.json
+          auto_save_interval: 1m
+          use_router_r1_rewards: true
+          enable_llm_routing: true
+          router_r1_server_url: "http://host.docker.internal:8888"
+          cost_reward_alpha: 0.3
+          format_reward_penalty: -1.0
+          model_cost_per_token: {}
+          llm_routing_fallback: thompson
+          enable_multi_round_aggregation: false
+          max_aggregation_rounds: 3
+      modelRefs:
+        - model: "Google-Gemma-3-27B"
+          use_reasoning: false
+        - model: "gpt-oss-20b"
+          use_reasoning: false
+        - model: "Llama-4-Maverick-17B-128E-Instruct-FP8"
+          use_reasoning: false
+        - model: "Llama-4-Scout-17B-16E-Instruct-FP8"
+          use_reasoning: false
+        - model: "Microsoft-Phi-4"
+          use_reasoning: false
+        - model: "Mistral-Small-3.1-24B-Instruct-2503"
+          use_reasoning: false
+
+global:
+  router:
+    config_source: file
+    strategy: priority
+    model_selection:
+      enabled: true
+      method: rl_driven
+  stores:
+    semantic_cache:
+      enabled: false
