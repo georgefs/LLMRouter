@@ -11,7 +11,14 @@ Subcommands:
   annotation gen <dataset> <model> --strategy llm --judge <judge_model>
   router prepare --datasets d1,d2 --models m1,m2 --strategy s --output data.npz
   router train <type> --data data.npz [--output router.pkl] [router options]
-  router eval <type> --data data.npz [--model router.pkl]
+  router eval <type> --data data.npz [--model router.pkl] [--baseline-hr H --baseline-cost C]
+  router bench <types> --data data.npz [--fractions f1,f2] [--repeats N] [--show-cost]
+  router analyze data.npz                             四維根因分析（Technical Report §7）
+
+  bench <types> 格式：逗號分隔，從頭訓練用 <type>，載入已訓練用 <type>:<model.pkl>
+    e.g.  oracle,random,knn                           對比三種 router（從頭訓練）
+          oracle,knn:knn.pkl,sw:sw.pkl                oracle 從頭，其餘載入 .pkl
+          oracle,random,knn --fractions 1.0 --repeats 1  單次全資料橫向對比
 
 預處理選項（prepare / train / bench 共用）：
   --min-var <float>                  過濾低鑑別度訓練樣本（np.var(scores) ≤ min_var）
@@ -110,24 +117,17 @@ def cmd_annotation_gen(args: argparse.Namespace) -> None:
 
 
 def _build_annotator(args: argparse.Namespace, config: dict):
-    """依 --strategy 建立對應的 annotator 實例。"""
-    strategy = args.strategy
-
-    if strategy == "llm":
-        from .annotator import LLMJudgeAnnotator
-        from litellm import Router
-        if not args.judge:
-            print("錯誤：--strategy llm 需要指定 --judge <model_name>", file=sys.stderr)
-            sys.exit(1)
-        router = Router(model_list=config["model_list"])
-        return LLMJudgeAnnotator(router=router, judge=args.judge)
-
-    if strategy == "official":
-        from .annotator import OfficialAnnotator
-        return OfficialAnnotator()
-
-    print(f"錯誤：未知 strategy '{strategy}'。目前支援：llm, official", file=sys.stderr)
-    sys.exit(1)
+    """依 --strategy 從 registry 建立 annotator 實例。"""
+    from .annotator.registry import build as build_annotator, list_strategies
+    try:
+        return build_annotator(args.strategy, args, config)
+    except KeyError:
+        available = ", ".join(list_strategies()) or "（無）"
+        print(f"錯誤：未知 strategy '{args.strategy}'。已有：{available}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        print(f"錯誤：{e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def cmd_router_prepare(mgr: DatasetManager, args: argparse.Namespace) -> None:
@@ -171,15 +171,9 @@ def cmd_router_prepare(mgr: DatasetManager, args: argparse.Namespace) -> None:
     )
 
 
-_ROUTER_TYPES = {
-    "oracle": "OracleRouter",
-    "random": "RandomRouter",
-    "knn": "KNNRouter",
-    "mf": "MFRouter",
-    "sw": "SWRankingRouter",
-    "roberta": "RoBERTaMLCRouter",
-    "grpo": "GRPORouter",
-}
+def _ROUTER_TYPES() -> list[str]:
+    from .router.registry import list_routers
+    return list_routers()
 
 
 def _add_preprocess_args(p: argparse.ArgumentParser) -> None:
@@ -226,26 +220,108 @@ def _preprocess_data(data, args: argparse.Namespace):
     return data
 
 
+def _add_data_source_args(p: argparse.ArgumentParser) -> None:
+    """
+    共用資料來源參數：--data (NPZ) 或 --datasets/--models/--strategy（直接從資料庫）。
+    兩者互斥，必選其一。
+    """
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument(
+        "--data", default=None, metavar="NPZ",
+        help="RouterData .npz 路徑",
+    )
+    src.add_argument(
+        "--datasets", default=None, metavar="D1,D2",
+        help="逗號分隔的 dataset 名稱（直接從資料庫撈取，替代 --data）",
+    )
+    p.add_argument(
+        "--models", default=None, metavar="M1,M2",
+        help="逗號分隔的 model 名稱（--datasets 模式必填）",
+    )
+    p.add_argument(
+        "--strategy", default=None, metavar="STRATEGY",
+        help="annotation strategy，可逗號分隔多個（--datasets 模式必填）",
+    )
+    p.add_argument(
+        "--scorer", default="point",
+        help="scorer 名稱（預設 point，--datasets 模式使用）",
+    )
+    p.add_argument(
+        "--train-ratio", dest="train_ratio", type=float, default=0.6,
+        help="訓練集比例（預設 0.6，--datasets 模式使用）",
+    )
+    p.add_argument(
+        "--val-ratio", dest="val_ratio", type=float, default=0.1,
+        help="驗證集比例（預設 0.1）；剩餘為 test",
+    )
+    p.add_argument(
+        "--seed", type=int, default=42,
+        help="資料分割隨機種子（預設 42，--datasets 模式使用）",
+    )
+
+
+def _resolve_router_data(mgr: "DatasetManager", args: argparse.Namespace) -> "RouterData":
+    """
+    --data  → RouterData.load(path)
+    --datasets + --models + --strategy → DataPreparer.from_manager(mgr, ...)
+    """
+    if getattr(args, "data", None):
+        from .router import RouterData
+        return RouterData.load(args.data)
+
+    datasets_str = getattr(args, "datasets", None)
+    if not datasets_str:
+        print("錯誤：需要 --data 或 --datasets", file=sys.stderr)
+        sys.exit(1)
+
+    models_str   = getattr(args, "models", None)
+    strategy_str = getattr(args, "strategy", None)
+    if not models_str:
+        print("錯誤：--datasets 模式需要 --models", file=sys.stderr)
+        sys.exit(1)
+    if not strategy_str:
+        print("錯誤：--datasets 模式需要 --strategy", file=sys.stderr)
+        sys.exit(1)
+
+    from .router import DataPreparer
+    from .scorer import get as get_scorer
+    try:
+        scorer = get_scorer(getattr(args, "scorer", "point"))
+    except KeyError as e:
+        print(f"錯誤：{e}", file=sys.stderr)
+        sys.exit(1)
+
+    datasets   = [d.strip() for d in datasets_str.split(",") if d.strip()]
+    models     = [m.strip() for m in models_str.split(",") if m.strip()]
+    strategies = [s.strip() for s in strategy_str.split(",") if s.strip()]
+
+    data = DataPreparer().from_manager(
+        mgr,
+        datasets=datasets,
+        models=models,
+        strategies=strategies,
+        scorer=scorer,
+        train_ratio=getattr(args, "train_ratio", 0.6),
+        val_ratio=getattr(args, "val_ratio", 0.1),
+        seed=getattr(args, "seed", 42),
+    )
+    print(
+        f"[data] datasets={datasets} models={data.models} "
+        f"train={len(data.train_prompt)}, val={len(data.val_prompt)}, test={len(data.test_prompt)}"
+    )
+    return data
+
+
 def _router_cls_kwargs(router_type: str, args: argparse.Namespace):
     """回傳 (RouterClass, kwargs_dict)，不實例化。"""
-    from . import router as router_mod
-
-    cls = getattr(router_mod, _ROUTER_TYPES[router_type])
-    kwargs: dict = {}
-    if router_type == "knn":
-        kwargs = {"k": args.k, "emb_model": args.emb_model}
-    elif router_type == "mf":
-        kwargs = {
-            "latent_dim": args.latent_dim,
-            "epochs": args.epochs,
-            "lr": args.lr,
-            "emb_model": args.emb_model,
-        }
-    elif router_type == "sw":
-        kwargs = {"k": args.k, "temperature": args.temperature, "emb_model": args.emb_model}
-    elif router_type == "roberta":
-        kwargs = {"model_name": args.roberta_model, "epochs": args.epochs}
-    return cls, kwargs
+    from .router.registry import get as get_router
+    try:
+        cls, kwargs_fn = get_router(router_type)
+    except KeyError:
+        available = ", ".join(_ROUTER_TYPES()) or "（無）"
+        print(f"錯誤：未知 router 類型 '{router_type}'。可用：{available}", file=sys.stderr)
+        sys.exit(1)
+    return cls, kwargs_fn(args)
 
 
 def _build_router(router_type: str, args: argparse.Namespace):
@@ -254,7 +330,6 @@ def _build_router(router_type: str, args: argparse.Namespace):
 
 
 def cmd_router_train(args: argparse.Namespace) -> None:
-    import pickle
     from .router import RouterData
 
     data = RouterData.load(args.data)
@@ -263,77 +338,177 @@ def cmd_router_train(args: argparse.Namespace) -> None:
     r.fit(data)
 
     if args.output:
-        out = Path(args.output)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "wb") as f:
-            pickle.dump(r, f)
-        print(f"Router 已儲存 → {out}")
+        r.save(args.output)
+        print(f"Router 已儲存 → {args.output}")
 
 
-def cmd_router_bench(args: argparse.Namespace) -> None:
+def cmd_router_analyze(args: argparse.Namespace) -> None:
+    from .router import RouterData
+    from .router.dataset_eval import analyze, format_report
+
+    path = Path(args.data)
+    data = RouterData.load(path)
+
+    result = analyze(
+        data,
+        emb_model=args.emb_model,
+        emb_batch_size=args.emb_batch_size,
+        split=args.split,
+    )
+
+    report = format_report(result, title=str(path))
+    print(report)
+
+    if args.output:
+        import json
+        out = {
+            "file": str(path),
+            "split": args.split,
+            "n_train": result.n_train,
+            "n_val": result.n_val,
+            "n_test": result.n_test,
+            "models": result.models,
+            "n_samples": result.n_samples,
+            "avg_sim": result.avg_sim,
+            "dec_var": result.dec_var,
+            "ch_score": result.ch_score,
+            "ssb": result.ssb,
+            "ssw": result.ssw,
+            "n_clusters": result.n_clusters,
+            "is_exclusive": result.is_exclusive,
+            "multi_win_pct": result.multi_win_pct,
+            "win_rates": {m: float(r) for m, r in zip(result.models, result.win_rates)},
+            "model_acc": {m: float(a) for m, a in zip(result.models, result.model_acc)},
+            "emb_source": result.emb_source,
+            "overall_grade": result.overall_grade,
+            "ch_pass": result.ch_pass,
+            "sim_pass": result.sim_pass,
+            "var_pass": result.var_pass,
+            "warnings": result.warnings,
+        }
+        out_path = Path(args.output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+        print(f"\n分析結果已儲存 → {out_path}")
+
+
+def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
     """
     固定 test set，對一或多個 router 跑多種訓練資料大小的對比實驗。
     每個 (router, size) 組合重複多個隨機種子（repeats），結果取平均。
+
+    支援兩種 router 規格：
+      <type>           — 從頭訓練（oracle/random 例外，永遠從頭建立）
+      <type>:<path>    — 載入已訓練的 .pkl，不做訓練（size/seed 設為 1.0/0）
     """
-    from .router import RouterData, RouterBenchmark
+    from .router import RouterBenchmark
+    from .router.eval import RunResult, evaluate_full, compute_ter, compute_nbs
 
-    data = RouterData.load(args.data)
-    data = _preprocess_data(data, args)  # 預處理只做一次，之後 subsample 都從乾淨資料來
+    data = _resolve_router_data(mgr, args)
+    data = _preprocess_data(data, args)
 
-    router_types = [t.strip() for t in args.router_types.split(",") if t.strip()]
-    for rtype in router_types:
-        if rtype not in _ROUTER_TYPES:
-            print(
-                f"錯誤：未知 router 類型 '{rtype}'。可用：{', '.join(_ROUTER_TYPES)}",
-                file=sys.stderr,
-            )
+    specs = [s.strip() for s in args.router_types.split(",") if s.strip()]
+    available = _ROUTER_TYPES()
+    for spec in specs:
+        rtype = spec.split(":")[0]
+        if rtype not in available:
+            print(f"錯誤：未知 router 類型 '{rtype}'。可用：{', '.join(available)}", file=sys.stderr)
             sys.exit(1)
 
     seeds = list(range(args.repeats))
-
     if args.sizes:
         sizes: list = [int(s) for s in args.sizes.split(",") if s.strip()]
     else:
         sizes = [float(f) for f in args.fractions.split(",") if f.strip()]
 
     bench = RouterBenchmark(data)
-    for rtype in router_types:
-        cls, kwargs = _router_cls_kwargs(rtype, args)
-        bench.run(cls, kwargs, sizes=sizes, seeds=seeds, label=rtype)
+    for spec in specs:
+        if ":" in spec:
+            rtype, model_path = spec.split(":", 1)
+            from .router.registry import get as get_router
+            cls, _ = get_router(rtype)
+            r = cls.load(model_path)
+            try:
+                probs = r.predict_probs(data.test_prompt)
+                metrics = evaluate_full(probs, data)
+            except NotImplementedError:
+                metrics = r.evaluate(data)
+            label = Path(model_path).stem
+            bench._results.append(RunResult(
+                label=label,
+                size=1.0,
+                seed=0,
+                n_train=len(data.train_prompt),
+                mu=metrics["mu"],
+                vb=metrics["vb"],
+                ep=metrics["ep"],
+                hr=metrics.get("hr", 0.0),
+                avg_tokens=metrics.get("avg_tokens", 0.0),
+                avg_latency=metrics.get("avg_latency", 0.0),
+                cost=metrics.get("cost"),
+            ))
+        else:
+            cls, kwargs = _router_cls_kwargs(spec, args)
+            bench.run(cls, kwargs, sizes=sizes, seeds=seeds, label=spec)
+
+    if args.show_cost:
+        for r in bench._results:
+            if r.cost is None:
+                r.cost = r.avg_tokens
+        baseline = bench.strongest_baseline()
+        if baseline is not None:
+            for r in bench._results:
+                if r is baseline:
+                    continue
+                if r.cost is not None:
+                    r.ter = compute_ter(r.hr, r.cost, baseline.hr, baseline.cost)
+                    r.nbs = compute_nbs(r.hr, r.cost, baseline.hr, baseline.cost)
 
     print(
-        f"\nBenchmark  |  routers={','.join(router_types)}"
+        f"\nBenchmark  |  routers={','.join(specs)}"
         f"  |  test={len(data.test_prompt)}"
         f"  |  full_train={len(data.train_prompt)}"
         f"  |  repeats={args.repeats}"
     )
-    bench.print_table()
+    bench.print_table(show_cost_metrics=args.show_cost)
 
 
-def cmd_router_eval(args: argparse.Namespace) -> None:
-    import pickle
-    from .router import RouterData, OracleRouter, RandomRouter
+def cmd_router_eval(mgr: "DatasetManager", args: argparse.Namespace) -> None:
+    from .router.registry import get as get_router
+    from .router.eval import compute_ter, compute_nbs
 
-    data = RouterData.load(args.data)
+    data = _resolve_router_data(mgr, args)
+    data = _preprocess_data(data, args)
     router_type = args.router_type
 
     if router_type in ("oracle", "random"):
         r = _build_router(router_type, args)
         r.fit(data)
     elif args.model:
-        with open(args.model, "rb") as f:
-            r = pickle.load(f)
+        cls, _ = get_router(router_type)
+        r = cls.load(args.model)
     else:
         print("錯誤: 非 oracle/random router 需要 --model 指定已訓練的 router 檔案。", file=sys.stderr)
         sys.exit(1)
 
     metrics = r.evaluate(data)
+    cost = metrics["avg_tokens"]  # paper units: avg_tokens = Cost (model_costs=1)
+
     print(f"Router type : {router_type}")
     print(f"METRIC_MU   : {metrics['mu']:.4f}")
     print(f"METRIC_VB   : {metrics['vb']:.4f}")
     print(f"METRIC_EP   : {metrics['ep']:.4f}")
-    print(f"METRIC_TOKEN: {metrics['avg_tokens']:.2f}")
+    print(f"METRIC_HR   : {metrics['hr']:.4f}")
+    print(f"METRIC_COST : {cost:.2f}")
     print(f"METRIC_LAT  : {metrics['avg_latency']:.4f}")
+
+    if args.baseline_hr is not None and args.baseline_cost is not None:
+        ter = compute_ter(metrics["hr"], cost, args.baseline_hr, args.baseline_cost)
+        nbs = compute_nbs(metrics["hr"], cost, args.baseline_hr, args.baseline_cost)
+        ter_str = f"{ter:.4f}" if isinstance(ter, float) else ter
+        print(f"METRIC_TER  : {ter_str}")
+        print(f"METRIC_NBS  : {nbs:.4f}")
 
 
 def cmd_extract(mgr: DatasetManager, args: argparse.Namespace) -> None:
@@ -390,6 +565,19 @@ def _add_router_args(p: argparse.ArgumentParser) -> None:
         help="KNN / MF / SW: 嵌入模型名稱",
     )
     p.add_argument("--roberta-model", dest="roberta_model", default="roberta-base", help="RoBERTa: 模型名稱")
+    p.add_argument(
+        "--semantic-api-url",
+        dest="semantic_api_url",
+        default="http://localhost:8080",
+        help="SemanticAPI: semantic-router API server base URL（預設 http://localhost:8080）",
+    )
+    p.add_argument(
+        "--semantic-api-timeout",
+        dest="semantic_api_timeout",
+        type=float,
+        default=10.0,
+        help="SemanticAPI: 每次請求 timeout（秒，預設 10.0）",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -506,10 +694,41 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_preprocess_args(p_rt_prep)
 
+    # router analyze
+    p_rt_analyze = rt_sub.add_parser(
+        "analyze",
+        help="四維根因分析（Technical Report §7）：量化 dataset 的 routing 價值",
+    )
+    p_rt_analyze.add_argument("data", help="RouterData .npz 路徑")
+    p_rt_analyze.add_argument(
+        "--split",
+        choices=["train", "val", "test"],
+        default="train",
+        help="分析哪個 split（預設 train）",
+    )
+    p_rt_analyze.add_argument(
+        "--emb-model",
+        dest="emb_model",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        help="若 .npz 未預存 embedding，用此模型即時計算（預設 sentence-transformers/all-MiniLM-L6-v2）",
+    )
+    p_rt_analyze.add_argument(
+        "--emb-batch-size",
+        dest="emb_batch_size",
+        type=int,
+        default=32,
+        help="embedding 計算 batch size（預設 32）",
+    )
+    p_rt_analyze.add_argument(
+        "--output", "-o",
+        default=None,
+        help="將結構化結果儲存為 JSON 檔案（可選）",
+    )
+
     # router train
     p_rt_train = rt_sub.add_parser("train", help="訓練 router 並儲存")
     p_rt_train.add_argument(
-        "router_type", choices=list(_ROUTER_TYPES), help="router 類型"
+        "router_type", choices=_ROUTER_TYPES(), help="router 類型"
     )
     p_rt_train.add_argument("--data", required=True, help="RouterData .npz 路徑")
     p_rt_train.add_argument("--output", "-o", default=None, help="儲存 router 的 .pkl 路徑")
@@ -518,13 +737,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     # router bench
     p_rt_bench = rt_sub.add_parser(
-        "bench", help="固定 test set，對一或多個 router 跑訓練資料縮放實驗"
+        "bench", help="對多個 router 作橫向對比或訓練資料縮放實驗"
     )
     p_rt_bench.add_argument(
         "router_types",
-        help=f"逗號分隔的 router 類型（e.g. knn 或 knn,mf,oracle）；可用：{','.join(_ROUTER_TYPES)}",
+        help=(
+            "逗號分隔的 router 規格；"
+            "格式：<type> 從頭訓練，或 <type>:<model.pkl> 載入已訓練模型。"
+            f"可用類型：{','.join(_ROUTER_TYPES())}"
+        ),
     )
-    p_rt_bench.add_argument("--data", required=True, help="RouterData .npz 路徑")
+    _add_data_source_args(p_rt_bench)
     bench_group = p_rt_bench.add_mutually_exclusive_group()
     bench_group.add_argument(
         "--fractions",
@@ -539,17 +762,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_rt_bench.add_argument(
         "--repeats", type=int, default=3, help="每個大小重複幾次（不同隨機種子，預設 3）"
     )
+    p_rt_bench.add_argument(
+        "--show-cost", action="store_true",
+        help="以 §4.3 格式顯示 HR/Cost/TER/NBS；TER/NBS 以 HR 最高者為基準自動計算",
+    )
     _add_router_args(p_rt_bench)
     _add_preprocess_args(p_rt_bench)
 
     # router eval
     p_rt_eval = rt_sub.add_parser("eval", help="評估 router 效能")
     p_rt_eval.add_argument(
-        "router_type", choices=list(_ROUTER_TYPES), help="router 類型"
+        "router_type", choices=_ROUTER_TYPES(), help="router 類型"
     )
-    p_rt_eval.add_argument("--data", required=True, help="RouterData .npz 路徑")
+    _add_data_source_args(p_rt_eval)
     p_rt_eval.add_argument("--model", default=None, help="已訓練的 router .pkl 路徑（oracle/random 不需要）")
+    p_rt_eval.add_argument("--baseline-hr", type=float, default=None, metavar="FLOAT",
+        help="最強基準的 HR（用於計算 TER/NBS，e.g. 先跑 random eval 取得）")
+    p_rt_eval.add_argument("--baseline-cost", type=float, default=None, metavar="FLOAT",
+        help="最強基準的 Cost（avg_tokens，與 METRIC_COST 同單位）")
     _add_router_args(p_rt_eval)
+    _add_preprocess_args(p_rt_eval)
 
     return parser
 
@@ -606,12 +838,14 @@ def main() -> None:
         elif args.command == "router":
             if args.rt_action == "prepare":
                 cmd_router_prepare(mgr, args)
+            elif args.rt_action == "analyze":
+                cmd_router_analyze(args)
             elif args.rt_action == "train":
                 cmd_router_train(args)
             elif args.rt_action == "eval":
-                cmd_router_eval(args)
+                cmd_router_eval(mgr, args)
             elif args.rt_action == "bench":
-                cmd_router_bench(args)
+                cmd_router_bench(mgr, args)
 
     except (FileNotFoundError, FileExistsError) as e:
         print(f"錯誤: {e}", file=sys.stderr)
@@ -620,6 +854,9 @@ def main() -> None:
     # litellm.Router 會啟動非 daemon 背景 thread（health check、scheduler 等），
     # asyncio.run() 結束後這些 thread 仍存活，導致 process 掛住。
     # 使用 os._exit() 強制結束，避免等待背景 thread。
+    # 注意：os._exit() 在 pipe 模式下不自動 flush，需先手動 flush。
+    sys.stdout.flush()
+    sys.stderr.flush()
     os._exit(0)
 
 

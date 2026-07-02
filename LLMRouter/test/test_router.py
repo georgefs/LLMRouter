@@ -59,10 +59,10 @@ class TestDataPreparer:
 
     def test_default_split(self, small_data):
         d = small_data
-        # 60 / 10 / 30 split
+        # 60 / 20 / 20 split → 30 samples: train=18, val=6, test=6
         assert len(d.train_prompt) == 18
-        assert len(d.val_prompt) == 3
-        assert len(d.test_prompt) == 9
+        assert len(d.val_prompt) == 6
+        assert len(d.test_prompt) == 6
 
     def test_models_sorted(self, small_data):
         assert small_data.models == sorted(small_data.models)
@@ -201,7 +201,7 @@ class TestOracleRouter:
         r = OracleRouter()
         r.fit(small_data)
         keys = set(r.evaluate(small_data).keys())
-        assert keys == {"mu", "vb", "ep", "avg_tokens", "avg_latency"}
+        assert keys == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency"}
 
 
 # ── RandomRouter ─────────────────────────────────────────────────────────────
@@ -238,7 +238,7 @@ class TestRandomRouter:
         rnd = RandomRouter(seed=0)
         rnd.fit(small_data)
         keys = set(rnd.evaluate(small_data).keys())
-        assert keys == {"mu", "vb", "ep", "avg_tokens", "avg_latency"}
+        assert keys == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency"}
 
     def test_not_fitted_raises(self):
         from LLMRouter.router import RandomRouter

@@ -1,0 +1,56 @@
+# =============================================================================
+# semantic router 設定（03_deploy_endpoint 範例）
+#
+# 此檔案含有 shell 變數佔位符，部署前需展開：
+#   envsubst < semantic_router.yaml > /tmp/sr_resolved.yaml
+#   semantic-router start --config /tmp/sr_resolved.yaml
+#
+# 或使用 run.sh，它會自動展開並輸出展開後的路徑。
+#
+# 需要設定的變數（在 config.sh 或環境變數中）：
+#   DOCKER_HOST_IP  — 宿主機在 Docker 網路中的 IP
+#                     容器內無法用 localhost 連到宿主機；
+#                     Linux 通常是 docker0 的 IP（如 172.17.0.1）
+#   ENDPOINT_PORT   — LLMRouter Endpoint port（預設 8888）
+#
+# 模型清單由 run.sh 在訓練後自動填入，
+# 首次部署時可先用佔位符，再手動編輯 models 區塊。
+# =============================================================================
+
+version: v0.3
+
+listeners:
+  - name: http-8899
+    address: 0.0.0.0
+    port: 8899
+    timeout: 300s
+
+# ── 模型定義 ──────────────────────────────────────────────────────────────────
+# 請將 BACKEND_BASE_URL 和 API_KEY 替換為實際值
+providers:
+  defaults:
+    default_model: "${DEFAULT_MODEL}"
+
+  models: ${MODEL_BLOCKS}
+
+# ── 路由設定 ──────────────────────────────────────────────────────────────────
+routing:
+  modelCards: ${MODEL_CARDS}
+
+  decisions:
+    - name: default
+      description: "Route all requests via LLMRouter"
+      priority: 1
+      rules:
+        operator: AND
+        conditions: []
+      modelRefs: ${MODEL_REFS}
+
+  rl_driven:
+    enabled: true
+    # LLMRouter Endpoint 位址
+    # 必須使用宿主機 IP，Docker 容器內的 localhost 指向容器本身
+    router_r1_server_url: "http://${DOCKER_HOST_IP}:${ENDPOINT_PORT}"
+    # LLMRouter 不可用時降級為 Thompson Sampling
+    llm_routing_fallback: thompson
+    router_r1_timeout: 5

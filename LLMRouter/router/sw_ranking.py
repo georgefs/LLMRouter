@@ -30,6 +30,7 @@ class SWRankingRouter(BaseRouter):
         emb_model: str = "mixedbread-ai/mxbai-embed-large-v1",
         emb_batch_size: int = 16,
     ) -> None:
+        super().__init__()
         self.k = k
         self.temperature = temperature
         self.emb_model = emb_model
@@ -83,3 +84,62 @@ class SWRankingRouter(BaseRouter):
         if data.test_embed is not None:
             return self._predict_from_embed(data.test_embed)
         return self.predict_probs(data.test_prompt)
+
+    def save(self, path: "str | Path") -> None:
+        """
+        保存訓練好的 router（包含訓練集 embeddings + model_names）。
+
+        Args:
+            path: 保存路徑 (.pkl 檔案)
+        """
+        import pickle
+        from pathlib import Path
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint = {
+            'router_type': 'sw',
+            'model_names': self.model_names,
+            'k': self.k,
+            'temperature': self.temperature,
+            'emb_model': self.emb_model,
+            'emb_batch_size': self.emb_batch_size,
+            '_X_train': self._X_train,
+            '_Y_train': self._Y_train,
+        }
+
+        with open(path, 'wb') as f:
+            pickle.dump(checkpoint, f)
+        print(f"[SW] Saved to {path}")
+
+    @classmethod
+    def load(cls, path_or_ck: "str | Path | dict") -> "SWRankingRouter":
+        """載入訓練好的 router（恢復訓練集 embeddings + model_names）。"""
+        if isinstance(path_or_ck, dict):
+            checkpoint = path_or_ck
+        else:
+            import pickle
+            from pathlib import Path
+            with open(Path(path_or_ck), 'rb') as f:
+                checkpoint = pickle.load(f)
+            print(f"[SW] Loaded from {path_or_ck}")
+
+        router = cls(
+            k=checkpoint['k'],
+            temperature=checkpoint['temperature'],
+            emb_model=checkpoint['emb_model'],
+            emb_batch_size=checkpoint['emb_batch_size'],
+        )
+
+        router.model_names = checkpoint['model_names']
+        router._X_train = checkpoint['_X_train']
+        router._Y_train = checkpoint['_Y_train']
+        return router
+
+
+from .registry import register
+
+register("sw", SWRankingRouter, lambda a: {
+    "k": a.k, "temperature": a.temperature, "emb_model": a.emb_model,
+})

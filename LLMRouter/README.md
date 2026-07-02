@@ -216,39 +216,70 @@ python3 -m LLMRouter router eval  knn --data data.npz --model knn.pkl
 
 **輸出格式**：
 ```
-METRIC_MU   : 0.8123    # 選出模型的平均分數
-METRIC_VB   : 0.9241    # mu / oracle（越接近 1 越好）
+METRIC_HR   : 0.8438    # Hit Rate §4.3（選出模型達到最高分的比例）
+METRIC_COST : 1063.72   # 平均 token 數（若 model_costs 已知則為加權成本）
+METRIC_MU   : 0.6927    # 選出模型的平均分數
+METRIC_VB   : 0.8341    # mu / oracle（越接近 1 越好）
 METRIC_EP   : 1.2340    # 預測分佈的 entropy（bits）
 METRIC_TOKEN: 1234.0    # 平均 token 數
 METRIC_LAT  : 0.8210    # 平均 latency（秒）
+
+# 若有最強 baseline 可比較，另外顯示：
+METRIC_TER  :     4.12  # Trade-off Efficiency Ratio §4.3
+METRIC_NBS  :    22.50  # Net Benefit Score §4.3
 ```
 
-### router bench（訓練資料縮放實驗）
+### router bench（多 router 橫向對比 ＆ 縮放實驗）
 
-固定 test set，以不同 training data 大小評估 router 效能。每個大小重複多個隨機種子並取平均。
+一次對多個 router 作橫向對比，或固定單一 router 觀察訓練資料量對效能的影響。
 
 ```bash
-# 以比例指定（--fractions，預設）
+# ── 橫向對比（一次評估多個 router）──────────────────────────────────────
+# 直接從資料庫撈取（--datasets 模式）
+python3 -m LLMRouter router bench oracle,random,knn \
+  --datasets mmlu_pro_test \
+  --models gpt-oss-20b,Microsoft-Phi-4,Google-Gemma-3-27B \
+  --strategy llm \
+  --fractions 1.0 --repeats 1 --show-cost
+
+# 載入已訓練的模型（type:path 語法）
+python3 -m LLMRouter router bench \
+  oracle,random,knn:knn.pkl,sft_grpo:router.pkl \
+  --datasets mmlu_pro_test --models ... --strategy llm \
+  --show-cost
+
+# 使用 .npz 檔案
+python3 -m LLMRouter router bench oracle,random,knn \
+  --data data.npz --fractions 1.0 --show-cost
+
+# ── 縮放實驗（同一 router，觀察訓練量影響）────────────────────────────
 python3 -m LLMRouter router bench knn \
   --data data.npz \
   --fractions 0.1,0.2,0.3,0.5,0.7,1.0 \
   --repeats 3
 
-# 以固定筆數指定（--sizes，與 --fractions 互斥）
+# 以固定筆數指定（與 --fractions 互斥）
 python3 -m LLMRouter router bench knn \
   --data data.npz \
   --sizes 50,100,200,500 \
   --repeats 3
 ```
 
-**輸出範例**：
+**輸出範例**（`--show-cost`，橫向對比）：
 ```
-Benchmark: knn  |  test=N  |  full_train=N  |  repeats=3
-  fraction   n_train        mu        vb        ep       tokens     latency
-------------------------------------------------------------------------
-       10%        N    0.XXXX    0.XXXX    0.XXXX          0.0       0.000
-      100%        N    0.XXXX    0.XXXX    0.XXXX          0.0       0.000
+Benchmark  |  routers=oracle,random,knn  |  test=3610  |  full_train=7219  |  repeats=1
+router          size  n_train       HR        Cost         TER       NBS       mu       vb
+------------------------------------------------------------------------------------------
+oracle          100%     7219   1.0000      844.80           —         —   0.8305   1.0000
+------------------------------------------------------------------------------------------
+random          100%     7219   0.7028      772.91        0.29    -80.66   0.5473   0.6590
+------------------------------------------------------------------------------------------
+knn             100%     7219   0.8438     1063.72         Inv    -72.78   0.6927   0.8341
 ```
+
+- `--show-cost` 才顯示 Cost / TER / NBS；TER/NBS 以非 oracle 中 HR 最強者為 baseline
+- `Dominant`：HR 與 Cost 雙優於 baseline；`Inv`：雙劣
+- `type:path` 語法可混合「從頭訓練」與「載入已訓練模型」
 
 ### 訓練集預處理參數
 
@@ -291,20 +322,105 @@ python3 -m LLMRouter router bench knn \
   --sizes 50,100,200,500
 ```
 
+### router analyze（資料集品質分析）
+
+在訓練 router 之前，先評估資料集是否具備足夠的 routing 價值。
+實作 Technical Report §7 的四維根因分析框架。
+
+```bash
+# 單一 dataset（.npz 格式）
+python3 -m LLMRouter router analyze data.npz
+
+# 指定 embedding 模型（.npz 沒有預存 embedding 時）
+python3 -m LLMRouter router analyze data.npz \
+  --emb-model sentence-transformers/all-MiniLM-L6-v2
+
+# 分析 val 或 test split
+python3 -m LLMRouter router analyze data.npz --split val
+
+# 輸出結構化 JSON
+python3 -m LLMRouter router analyze data.npz -o result.json
+```
+
+**批次分析多個 dataset**（直接從資料庫撈取，不需先 prepare .npz）：
+
+```bash
+# 對比表（每個 dataset 一行，標示 ✓/✗）
+python -m LLMRouter.scripts.analyze_datasets \
+  --datasets mmlu_pro_test,arc_challenge,gpqa_diamond \
+  --models gpt-oss-20b,Microsoft-Phi-4,Google-Gemma-3-27B \
+  --strategy llm
+
+# 加 --detail 印每個 dataset 的完整診斷報告
+python -m LLMRouter.scripts.analyze_datasets \
+  --datasets ds1,ds2 --models ... --strategy llm --detail
+
+# 輸出 CSV
+python -m LLMRouter.scripts.analyze_datasets \
+  --datasets ds1,ds2 --models ... --strategy llm --output results.csv
+```
+
+**對比表輸出範例**：
+```
+================================================================================
+ §7 Dataset Routing Value — 四維指標對比
+================================================================================
+dataset       | N     | CH Score | Avg_Sim  | Dec_Var σ² | grade      | n_models
+--------------+-------+----------+----------+------------+------------+---------
+mmlu_pro_test | 7,219 | 3.8200 ✓ | 0.0310 ✓ | 0.0220 ✓   | ✓ GOOD     | 3
+arc_challenge | 2,100 | 1.5400 ✗ | 0.0280 ✓ | 0.0190 ✓   | ✗ POOR     | 3
+gpqa_diamond  |   960 | 2.1500 ✓ | 0.0180 ✗ | 0.0310 ✓   | ~ MARGINAL | 3
+--------------+-------+----------+----------+------------+------------+---------
+  閾值：CH Score > 2.0  |  Avg_Sim > 0.025  |  Dec_Var > 0.015
+```
+
+**四個指標與閾值**（出自 Technical Report §8）：
+
+| 優先 | 指標 | 閾值 | 意義 |
+|------|------|------|------|
+| P1 | **CH Score**（Calinski-Harabasz） | > 2.0 | GT labels 在 embedding 空間的可分離性 |
+| P2 | **Avg_Sim**（平均成對 cosine） | > 0.025 | 特徵空間的語意結構 |
+| P3 | **Dec_Var σ²**（模型 win rate 變異數） | > 0.015 | 候選模型間的能力差距 |
+| — | **N**（訓練樣本數） | ≥ 3,000 | 泛化的統計基線 |
+
+**輸出範例**（通過所有閾值）：
+```
+═══════════════════════════════════════════════════════════════
+ Dataset Routing Value Report（技術報告 §7 四維框架）
+═══════════════════════════════════════════════════════════════
+── 四維指標（優先順序由高到低）
+  指標                   數值       閾值    狀態
+  CH Score（P1）       5.6391    > 2.0   ✓ PASS
+  Avg_Sim（P2）        0.0355   > 0.025  ✓ PASS
+  Dec_Var σ²（P3）     0.0584   > 0.015  ✓ PASS
+  N 樣本數              3,479   ≥ 3,000  ✓ 足夠
+
+ 綜合評分：GOOD — 具備高路由價值，適合訓練 SFT+GRPO
+```
+
+**評級**：`GOOD` / `MARGINAL` / `POOR`，附帶具體修復建議。
+
+---
+
 ### Router 類型與參數
 
-| 類型 | 說明 | 主要參數 |
-|---|---|---|
-| `oracle` | 永遠選最佳模型（上界基準） | — |
-| `random` | 隨機選模型（下界基準） | — |
-| `knn` | K 近鄰平均分數 | `--k` |
-| `mf` | Matrix Factorization | `--latent-dim`, `--epochs`, `--lr` |
-| `sw` | Similarity-Weighted Ranking | `--k`, `--temperature` |
-| `roberta` | RoBERTa 多標籤迴歸 | `--roberta-model`, `--epochs` |
+| 類型 | 說明 | 主要參數 | 依賴 |
+|---|---|---|---|
+| `oracle` | 永遠選最佳模型（上界基準） | — | core |
+| `random` | 隨機選模型（下界基準） | — | core |
+| `knn` | K 近鄰平均分數 | `--k` | ml |
+| `mf` | Matrix Factorization | `--latent-dim`, `--epochs`, `--lr` | ml |
+| `sw` | Similarity-Weighted Ranking | `--k`, `--temperature` | ml |
+| `roberta` | RoBERTa 多標籤迴歸 | `--roberta-model`, `--epochs` | ml |
+| `grpo` | 強化學習（PPO-clip + Group Relative Advantage） | — | ml |
+| `sft_grpo` | LLM-based router：Qwen2.5-3B + LoRA，SFT → GRPO 兩階段 | — | rl（需 CUDA） |
+| `semantic_api` | 呼叫 semantic-router HTTP API 做路由決策 | `--semantic-api-url`, `--semantic-api-timeout` | llm |
 
 KNN / MF / SW 共用 `--emb-model`（預設 `mixedbread-ai/mxbai-embed-large-v1`）。
 
-> **GRPORouter**（強化學習，PPO-clip + Group Relative Advantage）已實作於 Python API，尚未整合進 CLI。請見 [Python API → Router — 訓練與評估](#router--訓練與評估)。
+`semantic_api` 不做本地訓練，`fit()` 只驗證連線。
+
+`sft_grpo` 需安裝 `rl` extra（`./install.sh rl`），並需要 CUDA GPU。save/load 產出 `.pkl` + `<name>_adapter/` 兩個並排檔案。
 
 ---
 
@@ -523,6 +639,44 @@ data.save("data.npz")
 data = RouterData.load("data.npz")  # 之後直接載入，不需重新準備
 ```
 
+### SFTGRPORouter（LLM-based，SFT + GRPO）
+
+需安裝 `rl` extra，並需要 CUDA GPU：
+
+```bash
+./install.sh rl
+```
+
+```python
+from LLMRouter.router import SFTGRPORouter
+
+# 建構（所有超參數都有合理預設）
+router = SFTGRPORouter(
+    base_model="unsloth/Qwen2.5-3B-Instruct-bnb-4bit",
+    sft_epochs=1,       # Phase 1：imitate oracle（cheapest correct model）
+    grpo_steps=1000,    # Phase 2：cost-aware RL
+    grpo_alpha=0.2,     # cost penalty 權重
+)
+
+# 訓練（需要 CUDA，約 1-4 小時）
+router.fit(data)
+
+# 存檔（輸出 pkl + <name>_adapter/ 兩個並排檔案）
+router.save("sft_grpo.pkl")
+
+# 載入（不立即載入 GPU，首次 predict_probs() 才 lazy load）
+router2 = SFTGRPORouter.load("sft_grpo.pkl")
+
+# 推論（回傳 one-hot (N, M) numpy array）
+probs = router2.predict_probs(["What is photosynthesis?"])
+```
+
+**Reward 公式**（GRPO 階段，§4.3）：
+```
+FORMAT_BONUS(0.05) + max(1.0 + 1/n_correct - α × penalty, 0.0)
+```
+其中 `penalty` 為模型單價正規化後的 [0,1] 值，α = `grpo_alpha`。
+
 ### Router — 訓練集預處理
 
 兩個方法都只動 training set，**val / test 完全不受影響**，可串接使用。
@@ -606,20 +760,140 @@ sub = data.subsample_train(fraction=0.5, seed=42)
 
 ---
 
+## 擴充指南
+
+### 新增 Router
+
+1. 複製 `LLMRouter/router/_template.py`，將 `MyRouter` / `my_router` 替換為實際名稱。
+2. 實作三個方法：`_fit(data)`、`predict_probs(prompts)`、`save/load`。
+3. 在檔案末尾呼叫 `register()`：
+
+```python
+from .registry import register
+
+register("my_router", MyRouter, lambda a: {"param_a": a.param_a})
+```
+
+完成後不需修改任何其他檔案，CLI 即可辨識：
+
+```bash
+python3 -m LLMRouter router train my_router --data data.npz
+python3 -m LLMRouter router eval  my_router --data data.npz --model r.pkl
+```
+
+若需要新的 CLI 參數，在 `__main__._add_router_args()` 新增 `add_argument()`，並在 `kwargs_fn` 中取用即可。
+
+### 新增 Annotator
+
+1. 複製 `LLMRouter/annotator/_template.py`，替換名稱。
+2. 實作 `annotate(prompt, response, dataset_item) → (score, metadata)`。
+3. 在檔案末尾呼叫 `register()`：
+
+```python
+from .registry import register
+
+register("my_strategy", lambda args, config: MyAnnotator())
+```
+
+完成後：
+
+```bash
+python3 -m LLMRouter annotation gen <dataset> <model> --strategy my_strategy
+```
+
+### SemanticAPIRouter
+
+將 semantic-router 的 `POST /api/v1/classify/intent` 包裝成標準 `BaseRouter`，
+可直接與 KNN、MF、SW 等傳統 router 在同一個 benchmark 下比較。
+
+```python
+from LLMRouter.router import SemanticAPIRouter
+
+# fit() 只做連線驗證，不做本地訓練
+router = SemanticAPIRouter(base_url="http://localhost:8080", timeout=10.0)
+router.fit(data)  # data 提供 model_names；API 若不可連則 raise RuntimeError
+
+# 推論：每個 prompt 發一次 HTTP 請求
+probs = router.predict_probs(["What is photosynthesis?"])
+# → one-hot (N, M) 陣列；若 API 回傳未知模型名稱則 fallback 為均勻分布
+
+# 評估（與其他 router 完全相同的 metrics）
+metrics = router.evaluate(data)
+
+# 序列化（不含 local model weights，只儲存 URL + model_names）
+router.save("semantic_api.pkl")
+loaded = SemanticAPIRouter.load("semantic_api.pkl")
+```
+
+**CLI**：
+
+```bash
+# train = 只驗證連線
+python3 -m LLMRouter router train semantic_api \
+  --data data.npz \
+  --semantic-api-url http://localhost:8080 \
+  -o sr.pkl
+
+# eval = 對 test set 發 HTTP 請求並計算 metrics
+python3 -m LLMRouter router eval semantic_api \
+  --data data.npz --model sr.pkl
+```
+
+---
+
+### Registry 查詢
+
+```python
+from LLMRouter.router.registry import list_routers
+from LLMRouter.annotator.registry import list_strategies
+
+list_routers()     # ['grpo', 'knn', 'mf', 'oracle', 'random', 'roberta', 'semantic_api', 'sft_grpo', 'sw']
+list_strategies()  # ['llm', 'official']
+```
+
+---
+
 ## 測試
 
 ```bash
-# 全部測試
+# 全部測試（273 個）
 pytest LLMRouter/test/ -v
 
-# 只跑 manager 相關
-pytest LLMRouter/test/test_manager.py -v
+# 只跑特定模組
+pytest LLMRouter/test/test_manager.py -v              # DatasetManager
+pytest LLMRouter/test/test_router.py -v               # Router 訓練 / 資料處理
+pytest LLMRouter/test/test_annotator.py -v            # Annotator / Scorer
+pytest LLMRouter/test/test_model_binding.py -v        # model_names 綁定 / save-load / checkpoint
+pytest LLMRouter/test/test_endpoint_server.py -v      # HTTP endpoint 功能
+pytest LLMRouter/test/test_endpoint_behavior.py -v    # HTTP endpoint 行為契約（24 個）
+pytest LLMRouter/test/test_integration_workflow.py -v # semantic-router 整合流程
+pytest LLMRouter/test/test_eval.py -v                 # 評估指標函數
+pytest LLMRouter/test/test_eval_metrics.py -v         # §4.3 HR/Cost/TER/NBS 數學正確性
+pytest LLMRouter/test/test_semantic_api_router.py -v  # SemanticAPIRouter（mock + live）
+pytest LLMRouter/test/test_dataset_eval.py -v         # 四維根因分析框架（22 個）
+```
 
-# 只跑 router 相關
-pytest LLMRouter/test/test_router.py -v
+### 測試 Fixtures（conftest.py）
 
-# 只跑 annotator 相關
-pytest LLMRouter/test/test_annotator.py -v
+`LLMRouter/test/conftest.py` 提供四個共用 fixture，新增測試時直接使用：
+
+| Fixture | Scope | 說明 |
+|---|---|---|
+| `router_data` | session | RouterData 50筆、384-dim 嵌入、seed=42 |
+| `trained_knn` | function | 已訓練的 KNNRouter（k=5） |
+| `saved_router_path` | function | .pkl 暫存路徑，teardown 自動清除 |
+| `live_endpoint` | function | 執行中的 endpoint server，提供 `.base_url` |
+
+```python
+# 使用範例
+def test_my_router(router_data, trained_knn):
+    preds = trained_knn.predict(router_data.test_prompt)
+    assert all(m in trained_knn.model_names for m in preds)
+
+def test_my_endpoint(live_endpoint):
+    import httpx
+    r = httpx.get(f"{live_endpoint.base_url}/health")
+    assert r.json()["status"] == "healthy"
 ```
 
 測試使用 `tmp_path` fixture，不依賴任何外部服務或實際資料。LLM 呼叫透過 `unittest.mock` 模擬。

@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Vim swap files
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Trained model artifacts (large)
+models/
+datasets/
+*.npz
+*.pkl
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# Unsloth / vllm runtime
+.vllm-sr/
+LLMRouter/.vllm-sr/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc scratch
+t.sh
+*.log

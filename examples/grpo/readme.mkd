@@ -1,0 +1,37 @@
+prerequest
+---
+1. router pkl (best_router_adapter  best_router.pkl)
+2. litellm config(litellm.yaml)
+3. semantic router config(semantic_router.yaml)
+
+deploy
+---
+
+1. start litellm
+---
+`litellm –config litellm.yaml`
+
+2. start grpo LLMRouter router endpoint
+---
+`python3 -m LLMRouter.scripts.start_endpoint --router best_router.pkl`
+
+3. start rl-driven semantic router 
+---
+`vllm-sr serve --config semantic_router.yaml`
+
+
+test
+---
+```
+curl -s http://localhost:8899/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "MoM",
+    "messages": [
+      {
+        "role": "user",
+        "content": [{"type": "input_text", "text": "1+1=?"}]
+      }
+    ]
+  }'
+```

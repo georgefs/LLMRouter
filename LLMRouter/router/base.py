@@ -14,9 +14,14 @@ class BaseRouter(ABC):
     Router 基底類別。
 
     子類別需實作：
-        fit(data)            — 以 RouterData.train_* 訓練
+        _fit(data)             — 以 RouterData.train_* 訓練
         predict_probs(prompts) — 回傳 (N, M) 分數矩陣（argmax 為選擇的模型）
+        save(path)             — 序列化到 .pkl（或目錄）
+        load(path_or_ck)       — classmethod，從路徑或 checkpoint dict 還原
     """
+
+    def __init__(self):
+        self.model_names: "List[str] | None" = None
 
     def fit(
         self,
@@ -27,6 +32,8 @@ class BaseRouter(ABC):
         """
         以訓練集訓練 router。
 
+        新增功能：自動綁定 model_names
+
         Args:
             data: RouterData
             train_size: 訓練資料大小
@@ -34,6 +41,16 @@ class BaseRouter(ABC):
                         int   → 固定筆數（≥ 1）
             seed: subsample 的隨機種子
         """
+        # 綁定 model_names
+        if self.model_names is None:
+            self.model_names = data.models.copy()
+        else:
+            if self.model_names != data.models:
+                raise ValueError(
+                    f"Model mismatch: router already bound to {self.model_names}, "
+                    f"but data has {data.models}"
+                )
+
         if train_size != 1.0:
             data = data.subsample_train(train_size, seed=seed)
         self._fit(data)
@@ -49,9 +66,34 @@ class BaseRouter(ABC):
         分數不必是機率，argmax 將用於選擇模型。
         """
 
-    def predict(self, prompts: List[str]) -> np.ndarray:
-        """回傳每個 prompt 對應的模型 index（shape: (N,)）。"""
+    @abstractmethod
+    def save(self, path: "str | Path") -> None:
+        """序列化訓練後的 router 到 path（.pkl 或目錄）。"""
+
+    @classmethod
+    @abstractmethod
+    def load(cls, path_or_ck: "str | Path | dict") -> "BaseRouter":
+        """從路徑或已載入的 checkpoint dict 還原 router。"""
+
+    def predict_indices(self, prompts: List[str]) -> np.ndarray:
+        """
+        回傳每個 prompt 對應的模型索引（shape: (N,)）。
+        內部使用，用於評估。
+        """
         return np.argmax(self.predict_probs(prompts), axis=1)
+
+    def predict(self, prompts: List[str]) -> List[str]:
+        """
+        回傳每個 prompt 對應的模型名稱。
+
+        Returns:
+            List[str]: 模型名稱列表（與 prompts 同長度）
+        """
+        if self.model_names is None:
+            raise RuntimeError("Router must be trained first (model_names not bound)")
+
+        indices = self.predict_indices(prompts)
+        return [self.model_names[idx] for idx in indices]
 
     def _predict_for_eval(self, data: RouterData) -> np.ndarray:
         """
