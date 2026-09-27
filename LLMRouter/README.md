@@ -358,6 +358,11 @@ python -m LLMRouter.scripts.analyze_datasets \
 # 輸出 CSV
 python -m LLMRouter.scripts.analyze_datasets \
   --datasets ds1,ds2 --models ... --strategy llm --output results.csv
+
+# 直接分析 router prepare 產出的 .npz（有預存 embedding 就直接用）
+# data.npz 以上層目錄名作為標籤；--models 可選，用來篩選欄位
+python -m LLMRouter.scripts.analyze_datasets \
+  --data runs/a/data.npz,runs/b/data.npz [--models m1,m2] [--split train]
 ```
 
 **對比表輸出範例**：

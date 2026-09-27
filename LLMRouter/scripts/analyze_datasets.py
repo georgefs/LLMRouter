@@ -16,6 +16,11 @@ python -m LLMRouter.scripts.analyze_datasets \\
     --strategy llm \\
     [--detail]        # 每個 dataset 印完整診斷報告
     [--output out.csv]
+
+# 或直接分析 `router prepare` 產生的 .npz（可逗號分隔多個）
+python -m LLMRouter.scripts.analyze_datasets \\
+    --data runs/a/data.npz,runs/b/data.npz \\
+    [--split train]   # 分析哪個 split（預設 train）
 """
 from __future__ import annotations
 
@@ -109,61 +114,30 @@ def _row_val(r, h):
 # 單一 dataset 分析
 # ─────────────────────────────────────────────────────────────────────────────
 
-def analyze_one(
-    dataset_name: str,
-    models: List[str],
-    strategy: str,
+def _analyze_data(
+    label: str,
+    data,
     *,
-    scorer: str = "point",
-    train_ratio: float = 0.6,
-    val_ratio: float = 0.1,
-    seed: int = 42,
     emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
     emb_batch_size: int = 32,
-    config_path: Optional[str] = None,
-    base_path: Optional[str] = None,
+    split: str = "train",
     detail: bool = False,
 ) -> dict:
-    """
-    回傳 summary dict：
-      dataset, n_samples, avg_sim, dec_var, ch_score, grade, n_models,
-      win_rates (list), model_names (list)
-    """
-    from LLMRouter.manager import DatasetManager
-    from LLMRouter.router.data import DataPreparer
+    """對已備妥的 RouterData 計算四維指標，回傳 summary dict。"""
     from LLMRouter.router.dataset_eval import analyze, format_report
 
-    # ── DatasetManager ────────────────────────────────────────────────────────
-    import os
-    from LLMRouter.scorer import FieldScorer
-    mgr = DatasetManager(base_path or os.environ.get("DATA_PATH"))
-    scorer_obj = FieldScorer(scorer) if isinstance(scorer, str) else scorer
-
-    # ── 資料 ──────────────────────────────────────────────────────────────────
-    print(f"\n[{dataset_name}] 準備資料…", flush=True)
-    data = DataPreparer().from_manager(
-        mgr,
-        datasets=[dataset_name],
-        models=models,
-        strategies=[strategy],
-        scorer=scorer_obj,
-        train_ratio=train_ratio,
-        val_ratio=val_ratio,
-        seed=seed,
-    )
     model_names = list(data.models)
-    print(f"[{dataset_name}] train={len(data.train_prompt)}  "
+    print(f"[{label}] train={len(data.train_prompt)}  "
           f"val={len(data.val_prompt)}  test={len(data.test_prompt)}")
 
-    # ── 分析 ──────────────────────────────────────────────────────────────────
-    print(f"[{dataset_name}] 計算四維指標…", flush=True)
-    result = analyze(data, emb_model=emb_model, emb_batch_size=emb_batch_size)
+    print(f"[{label}] 計算四維指標（split={split}）…", flush=True)
+    result = analyze(data, emb_model=emb_model, emb_batch_size=emb_batch_size, split=split)
 
     if detail:
-        print(format_report(result, title=dataset_name))
+        print(format_report(result, title=label))
 
     return {
-        "dataset":     dataset_name,
+        "dataset":     label,
         "n_samples":   result.n_samples,
         "avg_sim":     result.avg_sim,
         "dec_var":     result.dec_var,
@@ -178,6 +152,98 @@ def analyze_one(
         "emb_source":  result.emb_source,
         "warnings":    result.warnings,
     }
+
+
+def analyze_one(
+    dataset_name: str,
+    models: List[str],
+    strategy: str,
+    *,
+    scorer: str = "point",
+    train_ratio: float = 0.6,
+    val_ratio: float = 0.1,
+    seed: int = 42,
+    emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+    emb_batch_size: int = 32,
+    split: str = "train",
+    config_path: Optional[str] = None,
+    base_path: Optional[str] = None,
+    detail: bool = False,
+) -> dict:
+    """
+    從 DatasetManager 撈取單一 dataset 並分析。回傳 summary dict：
+      dataset, n_samples, avg_sim, dec_var, ch_score, grade, n_models,
+      win_rates (list), model_names (list)
+    """
+    import os
+    from LLMRouter.manager import DatasetManager
+    from LLMRouter.router.data import DataPreparer
+    from LLMRouter.scorer import FieldScorer
+
+    mgr = DatasetManager(base_path or os.environ.get("DATA_PATH"))
+    scorer_obj = FieldScorer(scorer) if isinstance(scorer, str) else scorer
+
+    print(f"\n[{dataset_name}] 準備資料…", flush=True)
+    data = DataPreparer().from_manager(
+        mgr,
+        datasets=[dataset_name],
+        models=models,
+        strategies=[strategy],
+        scorer=scorer_obj,
+        train_ratio=train_ratio,
+        val_ratio=val_ratio,
+        seed=seed,
+    )
+    return _analyze_data(
+        dataset_name, data,
+        emb_model=emb_model, emb_batch_size=emb_batch_size,
+        split=split, detail=detail,
+    )
+
+
+def _npz_label(path: str) -> str:
+    """data.npz 這類通用檔名改用上層目錄名作為標籤。"""
+    from pathlib import Path
+    p = Path(path)
+    return p.parent.name if p.stem == "data" and p.parent.name else p.stem
+
+
+def analyze_npz(
+    path: str,
+    *,
+    models: Optional[List[str]] = None,
+    emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+    emb_batch_size: int = 32,
+    split: str = "train",
+    detail: bool = False,
+) -> dict:
+    """
+    分析 `router prepare` 產生的 .npz（若含預存 embedding 則直接使用）。
+    models 非空時只保留指定模型的欄位。
+    """
+    from LLMRouter.router.data import RouterData
+
+    label = _npz_label(path)
+    print(f"\n[{label}] 載入 {path}…", flush=True)
+    data = RouterData.load(path)
+
+    if models:
+        missing = [m for m in models if m not in data.models]
+        if missing:
+            raise ValueError(f"npz 中找不到模型：{missing}（可用：{list(data.models)}）")
+        idx = [list(data.models).index(m) for m in models]
+        data.train_score = data.train_score[:, idx]
+        data.val_score   = data.val_score[:, idx]
+        data.test_score  = data.test_score[:, idx]
+        data.test_tokens = data.test_tokens[:, idx]
+        data.test_time   = data.test_time[:, idx]
+        data.models      = list(models)
+
+    return _analyze_data(
+        label, data,
+        emb_model=emb_model, emb_batch_size=emb_batch_size,
+        split=split, detail=detail,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -215,12 +281,15 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--datasets",  required=True,
-                   help="逗號分隔的 dataset 名稱")
-    p.add_argument("--models",    required=True,
-                   help="逗號分隔的 model 名稱")
-    p.add_argument("--strategy",  required=True,
-                   help="annotation strategy（e.g. llm）")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--datasets",
+                     help="逗號分隔的 dataset 名稱（從 DatasetManager 撈取）")
+    src.add_argument("--data",
+                     help="逗號分隔的 .npz 路徑（`router prepare` 產出）")
+    p.add_argument("--models",    default=None,
+                   help="逗號分隔的 model 名稱（--datasets 必填；--data 時用來篩選欄位）")
+    p.add_argument("--strategy",  default=None,
+                   help="annotation strategy（e.g. llm；--datasets 必填）")
     p.add_argument("--scorer",    default="point",
                    help="scorer 名稱（預設 point）")
     p.add_argument("--train-ratio", type=float, default=0.6)
@@ -231,6 +300,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="embedding 模型（預設 all-MiniLM-L6-v2）")
     p.add_argument("--emb-batch-size", type=int, default=32,
                    help="embedding batch size（預設 32）")
+    p.add_argument("--split", default="train", choices=["train", "val", "test"],
+                   help="分析哪個 split（預設 train）")
     p.add_argument("--detail", action="store_true",
                    help="印每個 dataset 的完整診斷報告")
     p.add_argument("--config",  default=None, help="config.yaml 路徑")
@@ -240,30 +311,42 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
-    datasets = [d.strip() for d in args.datasets.split(",") if d.strip()]
-    models   = [m.strip() for m in args.models.split(",")   if m.strip()]
+    models = [m.strip() for m in (args.models or "").split(",") if m.strip()]
+    common = dict(
+        emb_model=args.emb_model,
+        emb_batch_size=args.emb_batch_size,
+        split=args.split,
+        detail=args.detail,
+    )
+
+    if args.data:
+        sources = [d.strip() for d in args.data.split(",") if d.strip()]
+        run = lambda src: analyze_npz(src, models=models or None, **common)
+    else:
+        if not models or not args.strategy:
+            parser.error("--datasets 需同時指定 --models 與 --strategy")
+        sources = [d.strip() for d in args.datasets.split(",") if d.strip()]
+        run = lambda src: analyze_one(
+            src, models, args.strategy,
+            scorer=args.scorer,
+            train_ratio=args.train_ratio,
+            val_ratio=args.val_ratio,
+            seed=args.seed,
+            config_path=args.config,
+            base_path=args.base,
+            **common,
+        )
 
     all_rows: List[dict] = []
 
-    for ds in datasets:
+    for src in sources:
         try:
-            row = analyze_one(
-                ds, models, args.strategy,
-                scorer=args.scorer,
-                train_ratio=args.train_ratio,
-                val_ratio=args.val_ratio,
-                seed=args.seed,
-                emb_model=args.emb_model,
-                emb_batch_size=args.emb_batch_size,
-                config_path=args.config,
-                base_path=args.base,
-                detail=args.detail,
-            )
-            all_rows.append(row)
+            all_rows.append(run(src))
         except Exception as exc:
-            print(f"\n[ERROR] {ds}: {exc}", file=sys.stderr)
+            print(f"\n[ERROR] {src}: {exc}", file=sys.stderr)
             import traceback; traceback.print_exc()
 
     if all_rows:
