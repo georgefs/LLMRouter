@@ -27,6 +27,7 @@ class RouterData:
     train_embed: Optional[np.ndarray] = None  # (N_train, D) — router prepare --emb-model 時填入
     val_embed: Optional[np.ndarray] = None    # (N_val,   D)
     test_embed: Optional[np.ndarray] = None   # (N_test,  D)
+    train_tokens: Optional[np.ndarray] = None # (N_train, N_models) — 舊版 .npz 無此欄位
 
     def save(self, path: str | Path) -> None:
         """儲存為 .npz 檔案。"""
@@ -49,6 +50,8 @@ class RouterData:
             arrays["val_embed"] = self.val_embed
         if self.test_embed is not None:
             arrays["test_embed"] = self.test_embed
+        if self.train_tokens is not None:
+            arrays["train_tokens"] = self.train_tokens
         np.savez(path, **arrays)
 
     def subsample_train(self, size: "float | int", seed: int = 42) -> "RouterData":
@@ -172,6 +175,7 @@ class RouterData:
             train_embed=self.train_embed[idx] if self.train_embed is not None else None,
             val_embed=self.val_embed,
             test_embed=self.test_embed,
+            train_tokens=self.train_tokens[idx] if self.train_tokens is not None else None,
         )
 
     @classmethod
@@ -191,6 +195,7 @@ class RouterData:
             train_embed=d["train_embed"] if "train_embed" in d else None,
             val_embed=d["val_embed"] if "val_embed" in d else None,
             test_embed=d["test_embed"] if "test_embed" in d else None,
+            train_tokens=d["train_tokens"] if "train_tokens" in d else None,
         )
 
 
@@ -303,6 +308,7 @@ class DataPreparer:
             train_embed=train_embed,
             val_embed=val_embed,
             test_embed=test_embed,
+            train_tokens=tokens[train_idx] if tokens_by_key_model else None,
         )
 
     def from_manager(

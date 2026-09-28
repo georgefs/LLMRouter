@@ -203,7 +203,16 @@ class SFTGRPORouter(BaseRouter):
         from .eval import model_unit_costs
         return model_unit_costs(self.model_names)
 
+    @staticmethod
+    def _train_avg_tokens(data: RouterData) -> Optional[np.ndarray]:
+        """訓練集每個模型的平均 token 數；無 train_tokens（舊版 .npz）或全為 0 時回傳 None。"""
+        tok = getattr(data, "train_tokens", None)
+        if tok is None or not np.any(tok):
+            return None
+        return np.asarray(tok, dtype=float).mean(axis=0)
+
     def _cost_penalty_vector(self, costs: np.ndarray) -> np.ndarray:
+        """Max Normalization（Tech Report §3.2）：P_cost = Cost_real / max(Cost_pool)。"""
         mx = costs.max()
         return (costs / mx).astype(float) if mx > 0 else np.zeros_like(costs, dtype=float)
 
@@ -273,8 +282,18 @@ class SFTGRPORouter(BaseRouter):
         torch.manual_seed(self.seed)
         np.random.seed(self.seed)
 
-        costs       = self._get_costs()
-        penalty_vec = self._cost_penalty_vector(costs)
+        costs = self._get_costs()
+        # Tech Report §3.2：Cost_real = Avg_Tokens × (Prompt_Price + Completion_Price) / 2
+        # Avg_Tokens 取自訓練集，不使用 test 資料
+        avg_tokens = self._train_avg_tokens(data)
+        if avg_tokens is not None:
+            penalty_vec = self._cost_penalty_vector(costs * avg_tokens)
+        else:
+            print("[SFT-GRPO] 警告：RouterData 無 train_tokens（請重跑 router prepare），"
+                  "cost penalty 退回只用單價")
+            penalty_vec = self._cost_penalty_vector(costs)
+        print("[SFT-GRPO] P_cost: " + ", ".join(
+            f"{n}={p:.3f}" for n, p in zip(self.model_names, penalty_vec)))
         self._system_prompt = self._build_system_prompt(costs)
 
         # Prefer raw (un-penalized) scores for SFT oracle labels
