@@ -22,9 +22,11 @@ dependencies = [
 # KNN / SW / MF / RoBERTa routers + embedding computation
 ml = [
     "torch>=2.0",
-    "transformers>=4.40",
-    "sentence-transformers>=3.0",
-    "huggingface-hub>=0.20",
+    # transformers 5.x 與 unsloth（rl profile，需 <=4.57.2）不相容，且會連帶
+    # import 不相容的 torchaudio；sentence-transformers 6.x 會強制拉到 transformers 5.x
+    "transformers>=4.40,<5",
+    "sentence-transformers>=3.0,<6",
+    "huggingface-hub>=0.20,<1.0",
     "tokenizers>=0.19",
     "safetensors>=0.4",
 ]
