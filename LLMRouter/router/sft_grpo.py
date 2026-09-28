@@ -149,7 +149,7 @@ class SFTGRPORouter(BaseRouter):
     def __init__(
         self,
         base_model: str = "unsloth/Qwen2.5-3B-Instruct-bnb-4bit",
-        max_seq_length: int = 9000,
+        max_seq_length: int = 4096,
         lora_rank: int = 16,
         # SFT
         sft_epochs: int = 1,
@@ -159,12 +159,12 @@ class SFTGRPORouter(BaseRouter):
         grpo_steps: int = 650,
         grpo_lr: float = 5e-7,
         grpo_alpha: float = 0.2,
-        grpo_num_generations: int = 16,
+        grpo_num_generations: int = 8,
         grpo_grad_acc: int = 16,
         grpo_beta: float = 0.2,
         grpo_temperature: float = 0.9,
         grpo_eval_steps: int = 50,
-        grpo_eval_samples: int = 200,
+        grpo_eval_samples: int = 100,
         # Inference
         inference_temperature: float = 0.1,
         inference_max_new_tokens: int = 512,
