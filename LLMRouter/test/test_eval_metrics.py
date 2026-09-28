@@ -372,3 +372,90 @@ class TestRouterBenchmark:
         bench = RouterBenchmark(data)
         assert bench.table() == "(無結果)"
         assert bench.strongest_baseline() is None
+
+
+# ── RouterBenchmark.add_single_models ────────────────────────────────────────
+
+class TestSingleModelBaselines:
+    def _data(self):
+        # model_0：全對、最多 token；model_1：一半對；model_2：全錯、最少 token
+        n = 20
+        scores = np.zeros((n, 3))
+        scores[:, 0] = 1.0
+        scores[::2, 1] = 1.0
+        tokens = np.tile([300.0, 200.0, 100.0], (n, 1))
+        prompts = [f"p{i}" for i in range(n)]
+        return RouterData(
+            train_prompt=prompts, val_prompt=prompts[:5], test_prompt=prompts,
+            train_score=scores, val_score=scores[:5], test_score=scores,
+            test_tokens=tokens, test_time=np.zeros((n, 3)),
+            models=["model_0", "model_1", "model_2"],
+        )
+
+    def test_four_roles_with_model_names(self):
+        bench = RouterBenchmark(self._data()).add_single_models()
+        got = {r.label: r.model for r in bench.results()}
+        # 未知單價 → 以 avg_tokens 排序成本
+        assert got == {
+            "single:strongest": "model_0",
+            "single:weakest":   "model_2",
+            "single:priciest":  "model_0",
+            "single:cheapest":  "model_2",
+        }
+        assert all(r.single_model for r in bench.results())
+
+    def test_price_roles_use_unit_price_not_tokens(self):
+        # gpt-oss 單價 0.30 < maverick 0.635，但 token 多到 token×單價 反超 → 仍以單價判定
+        d = self._data()
+        d.models = ["llama-4-maverick", "gpt-oss-20b", "microsoft-phi-4"]
+        d.test_tokens = np.tile([100.0, 1000.0, 100.0], (len(d.test_prompt), 1))
+        got = {r.label: r.model for r in RouterBenchmark(d).add_single_models().results()}
+        assert got["single:priciest"] == "llama-4-maverick"
+        assert got["single:cheapest"] == "microsoft-phi-4"
+
+    def test_strongest_single_model_ignores_routers(self):
+        bench = RouterBenchmark(self._data()).add_single_models()
+        bench.run(OracleRouter, label="oracle")
+        best = bench.strongest_single_model()
+        assert best.label == "single:strongest" and best.model == "model_0"
+
+    def test_table_shows_model_column(self):
+        bench = RouterBenchmark(self._data()).add_single_models()
+        table = bench.table(show_cost_metrics=True)
+        assert "model" in table.splitlines()[0]
+        assert "model_0" in table and "model_2" in table
+
+    def test_strongest_single_model_none_without_singles(self):
+        bench = RouterBenchmark(self._data())
+        bench.run(OracleRouter, label="oracle")
+        assert bench.strongest_single_model() is None
+
+
+# ── Oracle / Random 的 Cost ──────────────────────────────────────────────────
+
+class TestOracleRandomCost:
+    def _data(self):
+        n = 40
+        scores = np.zeros((n, 2)); scores[:, 1] = 1.0          # model_1 全對、model_0 全錯
+        tokens = np.tile([100.0, 300.0], (n, 1))
+        prompts = [f"p{i}" for i in range(n)]
+        return RouterData(
+            train_prompt=prompts, val_prompt=prompts[:5], test_prompt=prompts,
+            train_score=scores, val_score=scores[:5], test_score=scores,
+            test_tokens=tokens, test_time=np.zeros((n, 2)), models=["m0", "m1"],
+        )
+
+    def test_random_is_not_always_index0(self):
+        bench = RouterBenchmark(self._data())
+        bench.run(RandomRouter, label="random")
+        # 永遠選 index 0 時 HR = 0；真正隨機約 0.5
+        assert 0.4 < bench.results()[0].hr < 0.6
+
+    def test_costs_use_model_costs(self):
+        mc = [1.0, 2.0]
+        bench = RouterBenchmark(self._data())
+        bench.run(OracleRouter, label="oracle", model_costs=mc)
+        bench.run(RandomRouter, label="random", model_costs=mc)
+        oracle, rand = bench.results()
+        assert np.isclose(oracle.cost, 300.0 * 2.0)                 # 永遠選 m1
+        assert np.isclose(rand.cost, (100.0 * 1.0 + 300.0 * 2.0) / 2)  # 均勻期望

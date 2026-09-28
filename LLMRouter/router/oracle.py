@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 
@@ -27,7 +27,7 @@ class OracleRouter(BaseRouter):
             "OracleRouter 需要 ground truth，請改用 evaluate(data) 直接評估。"
         )
 
-    def evaluate(self, data: RouterData) -> dict:
+    def evaluate(self, data: RouterData, model_costs: Optional[np.ndarray] = None) -> dict:
         Y = data.test_score  # (N, M)
         n, m = Y.shape
 
@@ -52,7 +52,7 @@ class OracleRouter(BaseRouter):
             avg_tokens = float(np.mean(T[np.arange(n), idx]))
             avg_latency = float(np.mean(L[np.arange(n), idx]))
 
-        return {
+        out = {
             "mu":          mu,
             "vb":          vb,
             "ep":          ep,
@@ -60,6 +60,11 @@ class OracleRouter(BaseRouter):
             "avg_tokens":  avg_tokens,
             "avg_latency": avg_latency,
         }
+        if T is not None and T.shape[0] == n:
+            # model_costs=None → 乘數 1（Cost = token 數），與 evaluate_full 一致
+            mc = np.ones(m) if model_costs is None else np.asarray(model_costs, dtype=float)
+            out["cost"] = float(np.mean(T[np.arange(n), idx] * mc[idx]))
+        return out
 
     def save(self, path: "str | Path") -> None:
         """保存 OracleRouter（只需保存 model_names）。"""
@@ -112,7 +117,7 @@ class RandomRouter(BaseRouter):
         n, m = len(prompts), self._n_models
         return np.ones((n, m), dtype=np.float32) / m
 
-    def evaluate(self, data: RouterData) -> dict:
+    def evaluate(self, data: RouterData, model_costs: Optional[np.ndarray] = None) -> dict:
         Y = data.test_score
         n, m = Y.shape
 
@@ -138,7 +143,7 @@ class RandomRouter(BaseRouter):
         avg_tokens = float(np.mean(data.test_tokens)) if data.test_tokens is not None else 0.0
         avg_latency = float(np.mean(data.test_time)) if data.test_time is not None else 0.0
 
-        return {
+        out = {
             "mu":          mu,
             "vb":          vb,
             "ep":          ep,
@@ -146,6 +151,11 @@ class RandomRouter(BaseRouter):
             "avg_tokens":  avg_tokens,
             "avg_latency": avg_latency,
         }
+        if data.test_tokens is not None:
+            # 均勻隨機選擇的期望成本；model_costs=None → 乘數 1（Cost = token 數）
+            mc = np.ones(m) if model_costs is None else np.asarray(model_costs, dtype=float)
+            out["cost"] = float(np.mean(data.test_tokens * mc))
+        return out
 
     def save(self, path: "str | Path") -> None:
         """保存 RandomRouter（保存 seed + model_names）。"""

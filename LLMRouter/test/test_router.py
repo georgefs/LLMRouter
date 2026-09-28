@@ -232,7 +232,7 @@ class TestOracleRouter:
         r = OracleRouter()
         r.fit(small_data)
         keys = set(r.evaluate(small_data).keys())
-        assert keys == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency"}
+        assert keys == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency", "cost"}
 
 
 # ── RandomRouter ─────────────────────────────────────────────────────────────
@@ -269,7 +269,7 @@ class TestRandomRouter:
         rnd = RandomRouter(seed=0)
         rnd.fit(small_data)
         keys = set(rnd.evaluate(small_data).keys())
-        assert keys == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency"}
+        assert keys == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency", "cost"}
 
     def test_not_fitted_raises(self):
         from LLMRouter.router import RandomRouter

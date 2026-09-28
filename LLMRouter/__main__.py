@@ -393,6 +393,31 @@ def cmd_router_analyze(args: argparse.Namespace) -> None:
         print(f"\n分析結果已儲存 → {out_path}")
 
 
+def _cost_multipliers(models: List[str]) -> "Optional[np.ndarray]":
+    """
+    §4.3 Cost 用的每模型單價（$/1M tokens，MODEL_PRICING）。
+    Cost = avg(tokens × 單價)，單位為「每 1M 次查詢的 $」。
+    全部查不到單價時回傳 None（Cost 退回 token 數）；部分查不到時警告。
+    """
+    from .router.eval import model_unit_costs
+    mc = model_unit_costs(models)
+    if not mc.any():
+        print("[cost] MODEL_PRICING 查不到任何模型單價，Cost / TER / NBS 改以 token 數計算", file=sys.stderr)
+        return None
+    missing = [m for m, c in zip(models, mc) if c == 0]
+    if missing:
+        print(f"[cost] 警告：以下模型查不到單價，Cost 以 0 計：{missing}", file=sys.stderr)
+    return mc
+
+
+def _evaluate_router(r, data, model_costs) -> dict:
+    """評估 router 並以 model_costs 計算 Cost；Oracle / Random 走自己的 evaluate()。"""
+    from .router.eval import evaluate_full, _has_own_evaluate
+    if _has_own_evaluate(r):
+        return r.evaluate(data, model_costs=model_costs)
+    return evaluate_full(r._predict_for_eval(data), data, model_costs=model_costs)
+
+
 def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
     """
     固定 test set，對一或多個 router 跑多種訓練資料大小的對比實驗。
@@ -422,18 +447,17 @@ def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
     else:
         sizes = [float(f) for f in args.fractions.split(",") if f.strip()]
 
+    mc = _cost_multipliers(list(data.models))
     bench = RouterBenchmark(data)
+    if not args.no_single_models:
+        bench.add_single_models(model_costs=mc)
     for spec in specs:
         if ":" in spec:
             rtype, model_path = spec.split(":", 1)
             from .router.registry import get as get_router
             cls, _ = get_router(rtype)
             r = cls.load(model_path)
-            try:
-                probs = r.predict_probs(data.test_prompt)
-                metrics = evaluate_full(probs, data)
-            except NotImplementedError:
-                metrics = r.evaluate(data)
+            metrics = _evaluate_router(r, data, mc)
             label = Path(model_path).stem
             bench._results.append(RunResult(
                 label=label,
@@ -450,16 +474,18 @@ def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
             ))
         else:
             cls, kwargs = _router_cls_kwargs(spec, args)
-            bench.run(cls, kwargs, sizes=sizes, seeds=seeds, label=spec)
+            bench.run(cls, kwargs, sizes=sizes, seeds=seeds, label=spec, model_costs=mc)
 
     if args.show_cost:
         for r in bench._results:
             if r.cost is None:
                 r.cost = r.avg_tokens
-        baseline = bench.strongest_baseline()
+        # Tech Report §4.3：以最強單一模型為基準；關閉單一模型時退回 HR 最高的 router
+        baseline = bench.strongest_single_model() or bench.strongest_baseline()
         if baseline is not None:
             for r in bench._results:
-                if r is baseline:
+                # 基準本身（含同一模型的其他角色列）不算 TER / NBS
+                if r is baseline or (r.single_model and r.model == baseline.model):
                     continue
                 if r.cost is not None:
                     r.ter = compute_ter(r.hr, r.cost, baseline.hr, baseline.cost)
@@ -472,6 +498,9 @@ def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
         f"  |  repeats={args.repeats}"
     )
     bench.print_table(show_cost_metrics=args.show_cost)
+    if args.show_cost and baseline is not None:
+        print(f"TER / NBS 基準：{baseline.label}（HR={baseline.hr:.4f}, Cost={baseline.cost:.2f}）")
+        print("Cost 單位：" + ("avg(tokens × 單價)，即每 1M 次查詢的 $" if mc is not None else "平均 token 數"))
 
 
 def cmd_router_eval(mgr: "DatasetManager", args: argparse.Namespace) -> None:
@@ -492,8 +521,9 @@ def cmd_router_eval(mgr: "DatasetManager", args: argparse.Namespace) -> None:
         print("錯誤: 非 oracle/random router 需要 --model 指定已訓練的 router 檔案。", file=sys.stderr)
         sys.exit(1)
 
-    metrics = r.evaluate(data)
-    cost = metrics["avg_tokens"]  # paper units: avg_tokens = Cost (model_costs=1)
+    mc = _cost_multipliers(list(data.models))
+    metrics = _evaluate_router(r, data, mc)
+    cost = metrics.get("cost", metrics["avg_tokens"])
 
     print(f"Router type : {router_type}")
     print(f"METRIC_MU   : {metrics['mu']:.4f}")
@@ -764,7 +794,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_rt_bench.add_argument(
         "--show-cost", action="store_true",
-        help="以 §4.3 格式顯示 HR/Cost/TER/NBS；TER/NBS 以 HR 最高者為基準自動計算",
+        help="以 §4.3 格式顯示 HR/Cost/TER/NBS；TER/NBS 以 HR 最高的單一模型為基準",
+    )
+    p_rt_bench.add_argument(
+        "--no-single-models", dest="no_single_models", action="store_true",
+        help="不顯示單一模型 baseline 列（最準確 / 最不準確 / 最貴 / 最便宜的模型，永遠路由到該模型）",
     )
     _add_router_args(p_rt_bench)
     _add_preprocess_args(p_rt_bench)
@@ -779,7 +813,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_rt_eval.add_argument("--baseline-hr", type=float, default=None, metavar="FLOAT",
         help="最強基準的 HR（用於計算 TER/NBS，e.g. 先跑 random eval 取得）")
     p_rt_eval.add_argument("--baseline-cost", type=float, default=None, metavar="FLOAT",
-        help="最強基準的 Cost（avg_tokens，與 METRIC_COST 同單位）")
+        help="最強基準的 Cost（avg(tokens × 單價)，與 METRIC_COST 同單位）")
     _add_router_args(p_rt_eval)
     _add_preprocess_args(p_rt_eval)
 

@@ -288,6 +288,12 @@ def evaluate_full(
     return base
 
 
+def _has_own_evaluate(router) -> bool:
+    """router 是否覆寫了 BaseRouter.evaluate（OracleRouter / RandomRouter）。"""
+    from .base import BaseRouter
+    return type(router).evaluate is not BaseRouter.evaluate
+
+
 # ── RunResult ─────────────────────────────────────────────────────────────────
 
 
@@ -308,6 +314,8 @@ class RunResult:
     cost:        Optional[float] = None  # §4.3 Cost（需 model_costs）
     ter:  "Optional[Union[float, str]]" = None   # §4.3 TER
     nbs:         Optional[float] = None  # §4.3 NBS
+    single_model: bool          = False  # True = 永遠路由到同一模型的 baseline
+    model:       Optional[str]  = None   # single_model 時為該模型名稱
 
 
 # ── RouterBenchmark ───────────────────────────────────────────────────────────
@@ -395,37 +403,23 @@ class RouterBenchmark:
                 r = router_cls(**router_kwargs)
                 r.fit(sub)
 
-                # Oracle / Random override predict_probs → 使用各自的 evaluate(data)
-                try:
-                    # 若 router 有 _predict_for_eval，優先用它（可利用預存 embedding）
-                    if hasattr(r, "_predict_for_eval"):
-                        probs = r._predict_for_eval(data)
-                    else:
-                        probs = r.predict_probs(data.test_prompt)
+                if _has_own_evaluate(r):
+                    # Oracle / Random：用自己的 evaluate()（Random 的 predict_probs 為均勻分佈，
+                    # 走 argmax 會變成永遠選 index 0）
+                    metrics = r.evaluate(data, model_costs=model_costs)
+                    cost = metrics.get("cost")
+                    if cost is not None and baseline_hr is not None and baseline_cost is not None:
+                        metrics["ter"] = compute_ter(metrics["hr"], cost, baseline_hr, baseline_cost)
+                        metrics["nbs"] = compute_nbs(metrics["hr"], cost, baseline_hr, baseline_cost)
+                else:
+                    # 若 router 有 _predict_for_eval，可利用預存 embedding
+                    probs = r._predict_for_eval(data)
                     metrics = evaluate_full(
                         probs, data,
                         model_costs=model_costs,
                         baseline_hr=baseline_hr,
                         baseline_cost=baseline_cost,
                     )
-                except NotImplementedError:
-                    # 特殊 router（OracleRouter、RandomRouter）有自己的 evaluate()
-                    metrics = r.evaluate(data)
-                    # 若有 tokens 資料，補算 cost/ter/nbs
-                    T = data.test_tokens
-                    if T is not None and model_costs is not None:
-                        # 用 argmax(test_score) 作為 oracle 的決策
-                        idx = np.argmax(data.test_score, axis=1)
-                        mc = np.asarray(model_costs, dtype=float)
-                        cost = float(np.mean(T[np.arange(len(idx)), idx] * mc[idx]))
-                        metrics["cost"] = cost
-                        if baseline_hr is not None and baseline_cost is not None:
-                            metrics["ter"] = compute_ter(
-                                metrics["hr"], cost, baseline_hr, baseline_cost
-                            )
-                            metrics["nbs"] = compute_nbs(
-                                metrics["hr"], cost, baseline_hr, baseline_cost
-                            )
 
                 self._results.append(RunResult(
                     label=label,
@@ -444,6 +438,71 @@ class RouterBenchmark:
                 ))
 
         return self
+
+    def add_single_models(
+        self,
+        model_costs: "Optional[Union[List[float], np.ndarray]]" = None,
+    ) -> "RouterBenchmark":
+        """
+        加入「永遠路由到同一模型」的 baseline 列，只取四種代表模型
+        （對應 Tech Report 表格的 Strongest / Largest / Smallest Baseline）：
+
+          strongest — HR 最高（同分取較便宜）
+          weakest   — HR 最低
+          priciest  — 單價最高（MODEL_PRICING 的 (prompt + completion) / 2）
+          cheapest  — 單價最低
+
+        每個角色固定一列（同一模型身兼多角色時會重複出現），label 為
+        ``single:<role>``，模型名稱記在 RunResult.model、顯示於表格 model 欄。
+        MODEL_PRICING 查不到任何單價時，改以 avg_tokens 排序。
+        """
+        n, m = self.data.test_score.shape
+        names = list(self.data.models)
+        metrics = []
+        for k in range(m):
+            probs = np.zeros((n, m), dtype=np.float32)
+            probs[:, k] = 1.0
+            metrics.append(evaluate_full(probs, self.data, model_costs=model_costs))
+
+        hr = np.array([mt["hr"] for mt in metrics])
+        tokens = np.array([mt["avg_tokens"] for mt in metrics])
+        unit = model_unit_costs(names)
+        price = unit if unit.any() else tokens
+
+        roles = {
+            "strongest": max(range(m), key=lambda k: (hr[k], -price[k])),
+            "weakest":   min(range(m), key=lambda k: (hr[k], price[k])),
+            "priciest":  int(np.argmax(price)),
+            "cheapest":  int(np.argmin(price)),
+        }
+        for role, k in roles.items():
+            mt = metrics[k]
+            self._results.append(RunResult(
+                label=f"single:{role}",
+                size=1.0,
+                seed=0,
+                n_train=0,
+                mu=mt["mu"],
+                vb=mt["vb"],
+                ep=mt["ep"],
+                hr=mt["hr"],
+                avg_tokens=mt["avg_tokens"],
+                avg_latency=mt["avg_latency"],
+                cost=mt.get("cost"),
+                single_model=True,
+                model=names[k],
+            ))
+        return self
+
+    def strongest_single_model(self) -> Optional[RunResult]:
+        """
+        單一模型 baseline 中 HR 最高者（Tech Report §4.3 的 Strongest Baseline）；
+        HR 相同時取 cost 較低者。沒有單一模型結果時回傳 None。
+        """
+        singles = [r for r in self._results if r.single_model]
+        if not singles:
+            return None
+        return max(singles, key=lambda r: (r.hr, -(r.cost or float("inf"))))
 
     def results(self) -> List[RunResult]:
         """回傳所有已累積的 RunResult。"""
@@ -474,18 +533,23 @@ class RouterBenchmark:
                 seen_keys.add(key)
                 order.append(key)
 
+        lw = max(22, max(len(r.label) for r in self._results))
+        show_model = any(r.model for r in self._results)
+
         if show_cost_metrics:
             header = (
-                f"{'router':<22}  {'size':>8}  {'n_train':>7}"
+                f"{'router':<{lw}}  {'size':>8}  {'n_train':>7}"
                 f"  {'HR':>7}  {'Cost':>10}  {'TER':>10}  {'NBS':>8}"
                 f"  {'mu':>7}  {'vb':>7}"
             )
         else:
             header = (
-                f"{'router':<22}  {'size':>10}  {'n_train':>8}"
+                f"{'router':<{lw}}  {'size':>10}  {'n_train':>8}"
                 f"  {'HR':>7}  {'mu':>8}  {'vb':>8}  {'ep':>8}"
                 f"  {'tokens':>10}  {'latency':>10}"
             )
+        if show_model:
+            header += "  model"
         sep = "-" * len(header)
         lines = [header, sep]
 
@@ -529,16 +593,18 @@ class RouterBenchmark:
                 nbs_str = f"{sum(nbss)/len(nbss):+.2f}" if nbss else "—"
 
                 lines.append(
-                    f"{label:<22}  {size_str:>8}  {n_tr:>7d}"
+                    f"{label:<{lw}}  {size_str:>8}  {n_tr:>7d}"
                     f"  {hr:>7.4f}  {cost_str}  {ter_str:>10}  {nbs_str:>8}"
                     f"  {mu:>7.4f}  {vb:>7.4f}"
                 )
             else:
                 lines.append(
-                    f"{label:<22}  {size_str:>10}  {n_tr:>8d}"
+                    f"{label:<{lw}}  {size_str:>10}  {n_tr:>8d}"
                     f"  {hr:>7.4f}  {mu:>8.4f}  {vb:>8.4f}  {ep:>8.4f}"
                     f"  {tok:>10.1f}  {lat:>10.4f}"
                 )
+            if show_model:
+                lines[-1] += f"  {runs[0].model or '—'}"
 
         return "\n".join(lines)
 

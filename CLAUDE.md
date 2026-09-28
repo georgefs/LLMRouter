@@ -100,9 +100,10 @@ python -m LLMRouter router analyze --datasets mmlu_pro_test \
 | HR   | correct_routings / total | Hit Rate |
 | Cost | avg_tokens × model_unit_cost | 加權成本 |
 | TER  | ΔCost_Savings% / ΔHR_Sacrifice% | 效率比；HR ≥ baseline 時顯示 `Inv` |
-| NBS  | 3×ΔHR% + ΔCost_Savings% | Net Benefit Score，以 oracle 為基準 |
+| NBS  | 3×ΔHR% + ΔCost_Savings% | Net Benefit Score，以最強單一模型為基準 |
 
-TER / NBS 以最強 baseline（oracle 除外）為參照點，`--show-cost` 才顯示。
+TER / NBS 以最強單一模型（HR 最高，永遠路由到該模型）為參照點，`--show-cost` 才顯示。
+`router bench` 預設加入四列單一模型 baseline：`single:strongest / weakest / priciest / cheapest`（priciest / cheapest 依 MODEL_PRICING 單價，不乘 token 數），模型名稱顯示在 `model` 欄；`--no-single-models` 關閉。
 
 ---
 
@@ -150,6 +151,6 @@ KNN benchmark 在大 dataset（7k+）上跑嵌入計算耗時很長，測試時�
 
 - `DataPreparer.from_manager()` 是從 DatasetManager 直接建 RouterData 的入口，**不要另外寫 NPZ 再讀回**
 - `RouterBenchmark.strongest_baseline()` 以非 oracle 的 router 中 HR 最高者作為 TER/NBS 基準；沒有其他 router 時回傳 `None`
-- `model_unit_costs()` 從 `MODEL_PRICING` dict 查單價；未知 model 回傳 0，Cost 欄位會顯示 token 數而非金額
+- `model_unit_costs()` 從 `MODEL_PRICING` dict 查單價；`router bench` / `router eval` 的 Cost、TER、NBS 皆為實際花費 avg(tokens × 單價)（每 1M 次查詢的 $）。全部模型查不到單價時退回 token 數；部分查不到時該模型以 0 計並警告
 - `save_strategy="no"` 在 SFT TrainingArguments 中是刻意設定，最終 checkpoint 統一存到 `final/`
 - `.gitignore` 排除了 `models/`、`datasets/`、`*.pkl`、`*.npz` — 訓練產物**不進 git**
