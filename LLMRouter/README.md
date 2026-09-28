@@ -194,7 +194,7 @@ python3 -m LLMRouter router prepare ... --train-ratio 0.7 --val-ratio 0.1 -o dat
 
 # 預存 embedding（避免 router fit 時重複計算，適合多次 bench）
 python3 -m LLMRouter router prepare ... \
-  --emb-model mixedbread-ai/mxbai-embed-large-v1 \
+  --emb-model sentence-transformers/all-MiniLM-L6-v2 \
   --emb-batch-size 32 \
   -o data_with_emb.npz
 
@@ -308,7 +308,7 @@ knn             100%     7219   0.8438     1063.72         Inv    -72.78   0.692
 ```
 
 - 孤立的 prompt（無法歸入任何 cluster）全部保留
-- 去重用的嵌入模型可透過 `--dedup-emb-model` 指定（預設 `mixedbread-ai/mxbai-embed-large-v1`）
+- 去重用的嵌入模型可透過 `--dedup-emb-model` 指定（預設 `sentence-transformers/all-MiniLM-L6-v2`）
 - 不指定 `--dedup-eps` 則不套用
 
 #### 使用範例
@@ -421,7 +421,7 @@ gpqa_diamond  |   960 | 2.1500 ✓ | 0.0180 ✗ | 0.0310 ✓   | ~ MARGINAL | 3
 | `sft_grpo` | LLM-based router：Qwen2.5-3B + LoRA，SFT → GRPO 兩階段 | — | rl（需 CUDA） |
 | `semantic_api` | 呼叫 semantic-router HTTP API 做路由決策 | `--semantic-api-url`, `--semantic-api-timeout` | llm |
 
-KNN / MF / SW 共用 `--emb-model`（預設 `mixedbread-ai/mxbai-embed-large-v1`）。
+KNN / MF / SW 共用 `--emb-model`（預設 `sentence-transformers/all-MiniLM-L6-v2`）。
 
 `semantic_api` 不做本地訓練，`fit()` 只驗證連線。
 
@@ -634,7 +634,7 @@ data = DataPreparer().from_manager(
 # 預存 embedding：router fit / bench 時直接使用，省略重複計算
 data = DataPreparer().from_manager(
     mgr, ...,
-    emb_model="mixedbread-ai/mxbai-embed-large-v1",
+    emb_model="sentence-transformers/all-MiniLM-L6-v2",
     emb_batch_size=32,
 )
 # RouterData.train_embed / val_embed / test_embed 會被填入

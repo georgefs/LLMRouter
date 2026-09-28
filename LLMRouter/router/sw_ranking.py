@@ -27,7 +27,7 @@ class SWRankingRouter(BaseRouter):
         self,
         k: int = 50,
         temperature: float = 0.1,
-        emb_model: str = "mixedbread-ai/mxbai-embed-large-v1",
+        emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         emb_batch_size: int = 16,
     ) -> None:
         super().__init__()

@@ -25,7 +25,7 @@ export JUDGE="${JUDGE:-gpt-oss-120b}"
 export CONCURRENCY="${CONCURRENCY:-16}"
 
 # Embedding 模型（router prepare 時預存，加速後續 bench）
-export EMB_MODEL="${EMB_MODEL:-mixedbread-ai/mxbai-embed-large-v1}"
+export EMB_MODEL="${EMB_MODEL:-sentence-transformers/all-MiniLM-L6-v2}"
 
 # router bench 參數
 export FRACTIONS="${FRACTIONS:-0.1,0.3,0.5,0.7,1.0}"

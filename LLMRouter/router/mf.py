@@ -34,7 +34,7 @@ class MFRouter(BaseRouter):
         batch_size: int = 32,
         lr: float = 0.001,
         dropout: float = 0.1,
-        emb_model: str = "mixedbread-ai/mxbai-embed-large-v1",
+        emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         emb_batch_size: int = 16,
         seed: int = 42,
     ) -> None:

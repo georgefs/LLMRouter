@@ -23,7 +23,7 @@ Subcommands:
 預處理選項（prepare / train / bench 共用）：
   --min-var <float>                  過濾低鑑別度訓練樣本（np.var(scores) ≤ min_var）
   --dedup-eps <float>                啟用語意去重，指定 DBSCAN eps（e.g. 0.15）
-  --dedup-emb-model <name>           去重用嵌入模型（預設 mixedbread-ai/mxbai-embed-large-v1）
+  --dedup-emb-model <name>           去重用嵌入模型（預設 sentence-transformers/all-MiniLM-L6-v2）
   --dedup-sample-ratio <float>       每個重複 cluster 保留比例（預設 0.3）
 """
 
@@ -195,8 +195,8 @@ def _add_preprocess_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--dedup-emb-model",
         dest="dedup_emb_model",
-        default="mixedbread-ai/mxbai-embed-large-v1",
-        help="去重用的嵌入模型（預設 mixedbread-ai/mxbai-embed-large-v1）",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        help="去重用的嵌入模型（預設 sentence-transformers/all-MiniLM-L6-v2）",
     )
     p.add_argument(
         "--dedup-sample-ratio",
@@ -561,7 +561,7 @@ def _add_router_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--emb-model",
         dest="emb_model",
-        default="mixedbread-ai/mxbai-embed-large-v1",
+        default="sentence-transformers/all-MiniLM-L6-v2",
         help="KNN / MF / SW: 嵌入模型名稱",
     )
     p.add_argument("--roberta-model", dest="roberta_model", default="roberta-base", help="RoBERTa: 模型名稱")
