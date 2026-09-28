@@ -82,8 +82,10 @@ class _ValSaveCallback:
                         inp = self.tokenizer.apply_chat_template(
                             messages, add_generation_prompt=True, return_tensors="pt"
                         ).to("cuda")
+                        # greedy：與推論（_generate_index）一致，val reward 才不受抽樣雜訊影響
                         out = model.generate(
-                            inp, max_new_tokens=128, temperature=0.1, top_p=0.95,
+                            inp, attention_mask=inp.new_ones(inp.shape),
+                            max_new_tokens=128, do_sample=False,
                             pad_token_id=self.tokenizer.eos_token_id,
                         )
                         decoded = self.tokenizer.decode(
@@ -141,7 +143,7 @@ class SFTGRPORouter(BaseRouter):
         grpo_temperature:        Sampling temperature during GRPO training
         grpo_eval_steps:         Validate and checkpoint every N steps
         grpo_eval_samples:       Number of val samples per evaluation
-        inference_temperature:   Temperature for greedy inference
+        inference_temperature:   Unused — inference is greedy (do_sample=False); kept for pkl compatibility
         inference_max_new_tokens: Token budget for generation
         seed:                    Random seed
     """
@@ -607,11 +609,12 @@ class SFTGRPORouter(BaseRouter):
         inputs = self._tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, return_tensors="pt"
         ).to(device)
+        # greedy decoding：router 對模型選擇常很不確定，抽樣會讓同一題每次選不同模型
         outputs = self._model.generate(
             inputs,
+            attention_mask=inputs.new_ones(inputs.shape),
             max_new_tokens=self.inference_max_new_tokens,
-            temperature=self.inference_temperature,
-            top_p=0.95,
+            do_sample=False,
             pad_token_id=self._tokenizer.eos_token_id,
         )
         decoded = self._tokenizer.decode(
