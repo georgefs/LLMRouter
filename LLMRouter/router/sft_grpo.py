@@ -2,7 +2,8 @@
 SFT + GRPO LLM-based Router (Qwen2.5 + LoRA via unsloth / trl).
 
 Training pipeline (mirrors RouterEval/router/SFT-Router & GRPO-Router):
-  Phase 1 SFT  — imitate cheapest-correct-model oracle decisions
+  Phase 1 SFT  — imitate oracle labels on the mutually exclusive set
+                 (rows where exactly one model is correct; GT distribution kept)
   Phase 2 GRPO — RL fine-tuning with cost-aware reward (§4.3)
 
 Inference: generates "[[model_idx]]" text; predict_probs() returns a
@@ -155,7 +156,7 @@ class SFTGRPORouter(BaseRouter):
         sft_lr: float = 2e-4,
         sft_grad_acc: int = 8,
         # GRPO
-        grpo_steps: int = 1000,
+        grpo_steps: int = 650,
         grpo_lr: float = 5e-7,
         grpo_alpha: float = 0.2,
         grpo_num_generations: int = 16,
@@ -291,7 +292,7 @@ class SFTGRPORouter(BaseRouter):
             print(f"[SFT-GRPO] Phase 1 SFT — {self.sft_epochs} epoch(s)")
             model, tokenizer = self._run_sft(
                 model, tokenizer,
-                data.train_prompt, train_scores, costs,
+                data.train_prompt, train_scores,
                 sft_out,
             )
 
@@ -318,21 +319,25 @@ class SFTGRPORouter(BaseRouter):
 
     # ── SFT phase ─────────────────────────────────────────────────────────────
 
-    def _run_sft(self, model, tokenizer, prompts, scores, costs, output_dir: str):
+    def _run_sft(self, model, tokenizer, prompts, scores, output_dir: str):
         import torch
         from datasets import Dataset
         from unsloth import FastLanguageModel
         from trl import SFTTrainer
         from transformers import TrainingArguments
 
-        # Oracle label: cheapest model that answered correctly
+        # Mutually exclusive set（Tech Report §4.2.2 / §4.2.3）：只保留恰好一個
+        # 模型答對的樣本，標籤即該模型；不做平衡、不以成本挑標籤，保留原始 GT
+        # 分佈。成本意識交給 GRPO 階段。
+        exclusive = np.flatnonzero((np.asarray(scores) > 0).sum(axis=1) == 1)
+        if len(exclusive) == 0:
+            raise ValueError("SFT: no mutually exclusive samples (exactly one correct model) in train set.")
+        print(f"[SFT-GRPO] SFT exclusive set: {len(exclusive)}/{len(prompts)} samples")
+
         dataset_list = []
-        for i, q in enumerate(prompts):
-            correct = np.where(scores[i] > 0)[0]
-            best_idx = (
-                int(correct[np.argmin(costs[correct])]) if len(correct) > 0
-                else int(np.argmin(costs))
-            )
+        for i in exclusive:
+            q = prompts[i]
+            best_idx = int(np.flatnonzero(scores[i] > 0)[0])
             dataset_list.append({"messages": [
                 {"role": "system",    "content": self._system_prompt},
                 {"role": "user",      "content": f"Question: {q.strip()}"},

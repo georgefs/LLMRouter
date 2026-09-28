@@ -658,8 +658,8 @@ from LLMRouter.router import SFTGRPORouter
 # 建構（所有超參數都有合理預設）
 router = SFTGRPORouter(
     base_model="unsloth/Qwen2.5-3B-Instruct-bnb-4bit",
-    sft_epochs=1,       # Phase 1：imitate oracle（cheapest correct model）
-    grpo_steps=1000,    # Phase 2：cost-aware RL
+    sft_epochs=1,       # Phase 1：imitate oracle（exclusive set：只有一個模型答對的樣本）
+    grpo_steps=650,     # Phase 2：cost-aware RL
     grpo_alpha=0.2,     # cost penalty 權重
 )
 
