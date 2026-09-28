@@ -528,6 +528,10 @@ class SFTGRPORouter(BaseRouter):
                 per_device_train_batch_size=1,
                 per_device_eval_batch_size=self.grpo_num_generations,
                 gradient_accumulation_steps=self.grpo_grad_acc,
+                # unsloth 會把 batch size 提高到 num_generations；TRL 預設一次生成
+                # batch × grad_acc 條序列（8×16=128），遇到長 prompt 就 OOM。
+                # 改成每個 micro-step 各自生成，總 batch 不變。
+                steps_per_generation=1,
                 num_generations=self.grpo_num_generations,
                 max_prompt_length=self.max_seq_length,
                 max_completion_length=512,
