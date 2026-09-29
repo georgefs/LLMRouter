@@ -13,8 +13,8 @@ export DATA_PATH="${DATA_PATH:-/home/test123/work/tmp/LLMRouter2/datasets}"
 export CONFIG="${CONFIG:-config.yaml}"
 
 # 評測資料集（逗號分隔）
-#export DATASETS="${DATASETS:-hellaswag_train}"
-export DATASETS="${DATASETS:-mmlu_pro_test}"
+export DATASETS="${DATASETS:-hellaswag_train}"
+#export DATASETS="${DATASETS:-mmlu_pro_test}"
 
 # 候選模型（逗號分隔）
 export MODELS="${MODELS:-Google-Gemma-3-27B,gpt-oss-20b,Llama-4-Maverick-17B-128E-Instruct-FP8,Llama-4-Scout-17B-16E-Instruct-FP8,Microsoft-Phi-4,Mistral-Small-3.1-24B-Instruct-2503}"
