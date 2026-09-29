@@ -485,6 +485,7 @@ def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
             bench.run(cls, kwargs, sizes=sizes, seeds=seeds, label=spec, model_costs=mc,
                       save_dir=save_dir)
 
+    baseline = None
     if args.show_cost:
         for r in bench._results:
             if r.cost is None:
@@ -500,21 +501,61 @@ def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
                     r.ter = compute_ter(r.hr, r.cost, baseline.hr, baseline.cost)
                     r.nbs = compute_nbs(r.hr, r.cost, baseline.hr, baseline.cost)
 
-    print(
-        f"\nBenchmark  |  routers={','.join(specs)}"
+    lines = [
+        f"Benchmark  |  routers={','.join(specs)}"
         f"  |  test={len(data.test_prompt)}"
         f"  |  full_train={len(data.train_prompt)}"
-        f"  |  repeats={args.repeats}"
-    )
-    bench.print_table(show_cost_metrics=args.show_cost)
+        f"  |  repeats={args.repeats}",
+        bench.table(show_cost_metrics=args.show_cost),
+    ]
     saved = [r for r in bench.results() if r.saved_path]
     if saved:
-        print(f"\n已儲存 {len(saved)} 個 router → {save_dir}")
-        for r in saved:
-            print(f"  {r.label:<22} {r.saved_path}")
-    if args.show_cost and baseline is not None:
-        print(f"TER / NBS 基準：{baseline.label}（HR={baseline.hr:.4f}, Cost={baseline.cost:.2f}）")
-        print("Cost 單位：" + ("avg(tokens × 單價)，即每 1M 次查詢的 $" if mc is not None else "平均 token 數"))
+        lines.append(f"\n已儲存 {len(saved)} 個 router → {save_dir}")
+        lines += [f"  {r.label:<22} {r.saved_path}" for r in saved]
+    cost_unit = "avg(tokens × 單價)，即每 1M 次查詢的 $" if mc is not None else "平均 token 數"
+    if baseline is not None:
+        lines.append(f"TER / NBS 基準：{baseline.label}（HR={baseline.hr:.4f}, Cost={baseline.cost:.2f}）")
+        lines.append(f"Cost 單位：{cost_unit}")
+    print("\n" + "\n".join(lines))
+
+    if save_dir is not None:
+        _write_bench_results(save_dir, bench, lines, args, data, cost_unit, baseline)
+        print(f"\nbenchmark 結果 → {save_dir}（table.txt / results.csv / meta.json）")
+
+
+def _write_bench_results(save_dir, bench, lines, args, data, cost_unit, baseline) -> None:
+    """把 benchmark 結果寫到 save_dir：table.txt（同終端輸出）、results.csv（每個 run 一列）、meta.json。"""
+    import csv
+    import dataclasses
+    import datetime
+
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    (save_dir / "table.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    fields = [f.name for f in dataclasses.fields(bench.results()[0])] if bench.results() else []
+    with open(save_dir / "results.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for r in bench.results():
+            w.writerow(dataclasses.asdict(r))
+
+    meta = {
+        "timestamp":   datetime.datetime.now().isoformat(timespec="seconds"),
+        "command":     "python -m LLMRouter " + " ".join(sys.argv[1:]),
+        "args":        {k: v for k, v in vars(args).items() if not callable(v)},
+        "n_train":     len(data.train_prompt),
+        "n_val":       len(data.val_prompt),
+        "n_test":      len(data.test_prompt),
+        "models":      list(data.models),
+        "cost_unit":   cost_unit,
+        "baseline":    None if baseline is None else {
+            "label": baseline.label, "model": baseline.model,
+            "hr": baseline.hr, "cost": baseline.cost,
+        },
+    }
+    (save_dir / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
 
 def cmd_router_eval(mgr: "DatasetManager", args: argparse.Namespace) -> None:
@@ -812,11 +853,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_rt_bench.add_argument(
         "--save-dir", dest="save_dir", default=None,
-        help="訓練完的 router 儲存目錄（預設 <data.npz 所在目錄>/bench_routers/<時間戳>/）",
+        help="router 與 benchmark 結果的儲存目錄（預設 <data.npz 所在目錄>/bench_routers/<時間戳>/）",
     )
     p_rt_bench.add_argument(
         "--no-save", dest="no_save", action="store_true",
-        help="不儲存 bench 中訓練的 router",
+        help="不儲存任何檔案（訓練的 router 與 benchmark 結果）",
     )
     p_rt_bench.add_argument(
         "--no-single-models", dest="no_single_models", action="store_true",

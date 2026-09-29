@@ -154,4 +154,4 @@ KNN benchmark 在大 dataset（7k+）上跑嵌入計算耗時很長，測試時�
 - `model_unit_costs()` 從 `MODEL_PRICING` dict 查單價；`router bench` / `router eval` 的 Cost、TER、NBS 皆為實際花費 avg(tokens × 單價)（每 1M 次查詢的 $）。全部模型查不到單價時退回 token 數；部分查不到時該模型以 0 計並警告
 - `save_strategy="no"` 在 SFT TrainingArguments 中是刻意設定，最終 checkpoint 統一存到 `final/`
 - `.gitignore` 排除了 `models/`、`datasets/`、`*.pkl`、`*.npz`、`bench_routers/` — 訓練產物**不進 git**
-- `router bench` 會自動儲存每個訓練完的 router 到 `<data.npz 目錄>/bench_routers/<時間戳>/<label>_n<N>_seed<S>.pkl`（`--save-dir` 指定位置、`--no-save` 關閉）；`type:path` 載入的 router 不重複儲存
+- `router bench` 會自動儲存每個訓練完的 router 到 `<data.npz 目錄>/bench_routers/<時間戳>/<label>_n<N>_seed<S>.pkl`，同目錄另存 benchmark 結果 `table.txt`（同終端輸出）/ `results.csv`（每個 run 一列）/ `meta.json`（指令、資料、基準）（`--save-dir` 指定位置、`--no-save` 全部不存）；`type:path` 載入的 router 不重複儲存

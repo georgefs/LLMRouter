@@ -486,3 +486,34 @@ class TestBenchmarkAutoSave:
         bench.run(Broken, label="broken", save_dir=tmp_path)
         assert bench.results()[0].saved_path is None
         assert "儲存失敗" in capsys.readouterr().err
+
+
+# ── CLI: router bench 儲存結果 ───────────────────────────────────────────────
+
+class TestBenchCLISavesResults:
+    def _run(self, monkeypatch, tmp_path, *extra):
+        # 直接呼叫 cmd_router_bench：main() 結尾會 os._exit()，會連 pytest 一起結束
+        from LLMRouter.__main__ import build_parser, cmd_router_bench
+        npz = tmp_path / "data.npz"
+        _make_data(n=30, m=2).save(npz)
+        args = build_parser().parse_args([
+            "router", "bench", "oracle,random", "--data", str(npz),
+            "--fractions", "1.0", "--repeats", "1", "--show-cost", *extra,
+        ])
+        cmd_router_bench(None, args)
+        return tmp_path
+
+    def test_writes_table_csv_meta(self, monkeypatch, tmp_path):
+        import csv, json
+        out = tmp_path / "run"
+        self._run(monkeypatch, tmp_path, "--save-dir", str(out))
+        rows = list(csv.DictReader(open(out / "results.csv", encoding="utf-8")))
+        assert {r["label"] for r in rows} >= {"oracle", "random", "single:strongest"}
+        assert "oracle" in (out / "table.txt").read_text(encoding="utf-8")
+        meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
+        assert meta["n_test"] == 30 and meta["baseline"]["label"] == "single:strongest"
+        assert (out / "oracle_n30_seed0.pkl").exists()
+
+    def test_no_save_writes_nothing(self, monkeypatch, tmp_path):
+        self._run(monkeypatch, tmp_path, "--no-save")
+        assert not (tmp_path / "bench_routers").exists()
