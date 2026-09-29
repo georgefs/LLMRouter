@@ -40,7 +40,7 @@ def data():
 class TestSoftmaxEntropy:
     def test_uniform_max_entropy(self):
         probs = np.ones((10, 3))
-        ep = _softmax_entropy(probs, temperature=1.0)
+        ep = _softmax_entropy(probs)
         assert ep == pytest.approx(np.log2(3), abs=1e-5)
 
     def test_deterministic_zero_entropy(self):
@@ -62,7 +62,7 @@ class TestEvaluate:
     def test_keys(self, data):
         probs = np.ones((len(data.test_prompt), len(data.models)))
         m = evaluate(probs, data)
-        assert set(m.keys()) == {"mu", "vb", "ep", "avg_tokens", "avg_latency"}
+        assert set(m.keys()) == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency"}
 
     def test_oracle_vb_one(self, data):
         """完美預測 → vb=1.0。"""
@@ -127,6 +127,9 @@ class TestEvaluate:
             def predict_probs(self, prompts):
                 n, m = len(prompts), data.test_score.shape[1]
                 return np.full((n, m), 1.0 / m)
+            def save(self, path): pass
+            @classmethod
+            def load(cls, path_or_ck): return cls()
 
         r = FixedRouter()
         r.fit(data)

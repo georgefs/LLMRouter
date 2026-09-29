@@ -563,3 +563,8 @@ class OfficialAnnotator(BaseAnnotator):
             return _eval_truthfulqa(response, dataset_item), {"method": "answer_match"}
 
         return 0.0, {"method": "unsupported", "dataset_type": dataset_type}
+
+
+from .registry import register
+
+register("official", lambda args, config: OfficialAnnotator())

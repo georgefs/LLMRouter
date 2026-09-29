@@ -27,6 +27,7 @@ class KNNRouter(BaseRouter):
         emb_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         emb_batch_size: int = 32,
     ) -> None:
+        super().__init__()
         self.k = k
         self.emb_model = emb_model
         self.emb_batch_size = emb_batch_size
@@ -72,3 +73,61 @@ class KNNRouter(BaseRouter):
         if data.test_embed is not None:
             return self._predict_from_embed(data.test_embed)
         return self.predict_probs(data.test_prompt)
+
+    def save(self, path: "str | Path") -> None:
+        """
+        保存訓練好的 router（包含權重 + model_names）。
+
+        Args:
+            path: 保存路徑 (.pkl 檔案)
+        """
+        import pickle
+        from pathlib import Path
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint = {
+            'router_type': 'knn',
+            'model_names': self.model_names,
+            'k': self.k,
+            'emb_model': self.emb_model,
+            'emb_batch_size': self.emb_batch_size,
+            '_nn': self._nn,
+            '_X_train': self._X_train,
+            '_Y_train': self._Y_train,
+        }
+
+        with open(path, 'wb') as f:
+            pickle.dump(checkpoint, f)
+        print(f"[KNN] Saved to {path}")
+
+    @classmethod
+    def load(cls, path_or_ck: "str | Path | dict") -> "KNNRouter":
+        """載入訓練好的 router（恢復權重 + model_names）。"""
+        if isinstance(path_or_ck, dict):
+            checkpoint = path_or_ck
+        else:
+            import pickle
+            from pathlib import Path
+            with open(Path(path_or_ck), 'rb') as f:
+                checkpoint = pickle.load(f)
+            print(f"[KNN] Loaded from {path_or_ck}")
+
+        router = cls(
+            k=checkpoint['k'],
+            emb_model=checkpoint['emb_model'],
+            emb_batch_size=checkpoint['emb_batch_size'],
+        )
+
+        # 恢復 model_names 和內部狀態
+        router.model_names = checkpoint['model_names']
+        router._nn = checkpoint['_nn']
+        router._X_train = checkpoint['_X_train']
+        router._Y_train = checkpoint['_Y_train']
+        return router
+
+
+from .registry import register
+
+register("knn", KNNRouter, lambda a: {"k": a.k, "emb_model": a.emb_model})

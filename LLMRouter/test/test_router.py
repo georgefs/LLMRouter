@@ -59,10 +59,10 @@ class TestDataPreparer:
 
     def test_default_split(self, small_data):
         d = small_data
-        # 60 / 10 / 30 split
+        # 60 / 20 / 20 split → 30 samples: train=18, val=6, test=6
         assert len(d.train_prompt) == 18
-        assert len(d.val_prompt) == 3
-        assert len(d.test_prompt) == 9
+        assert len(d.val_prompt) == 6
+        assert len(d.test_prompt) == 6
 
     def test_models_sorted(self, small_data):
         assert small_data.models == sorted(small_data.models)
@@ -80,6 +80,18 @@ class TestDataPreparer:
         data = DataPreparer().prepare(records, tokens_by_key_model=tokens, times_by_key_model=times, seed=42)
         assert np.all(data.test_tokens == 100.0)
         assert np.all(data.test_time == 0.5)
+
+    def test_train_tokens_populated(self):
+        from LLMRouter.router import DataPreparer
+
+        records, _ = _make_records(20, 2, seed=1)
+        tokens = {(r["key"], r["model"]): 100.0 + int(r["model"][-1]) for r in records}
+        data = DataPreparer().prepare(records, tokens_by_key_model=tokens, seed=42)
+        assert data.train_tokens.shape == (len(data.train_prompt), 2)
+        assert np.allclose(data.train_tokens.mean(axis=0), [100.0, 101.0])
+
+    def test_train_tokens_none_when_not_provided(self, small_data):
+        assert small_data.train_tokens is None
 
     def test_empty_records_raises(self):
         from LLMRouter.router import DataPreparer
@@ -134,6 +146,25 @@ class TestRouterDataSaveLoad:
         assert loaded.train_prompt == small_data.train_prompt
         assert np.allclose(loaded.train_score, small_data.train_score)
         assert np.allclose(loaded.test_tokens, small_data.test_tokens)
+
+    def test_roundtrip_train_tokens(self, tmp_path):
+        from LLMRouter.router import DataPreparer, RouterData
+
+        records, _ = _make_records(20, 2, seed=1)
+        tokens = {(r["key"], r["model"]): 50.0 for r in records}
+        data = DataPreparer().prepare(records, tokens_by_key_model=tokens, seed=42)
+        data.save(tmp_path / "d.npz")
+        loaded = RouterData.load(tmp_path / "d.npz")
+        assert np.allclose(loaded.train_tokens, data.train_tokens)
+        # subsample 需同步切 train_tokens
+        sub = loaded.subsample_train(5, seed=0)
+        assert sub.train_tokens.shape == (5, 2)
+
+    def test_load_legacy_npz_without_train_tokens(self, small_data, tmp_path):
+        from LLMRouter.router import RouterData
+
+        small_data.save(tmp_path / "old.npz")
+        assert RouterData.load(tmp_path / "old.npz").train_tokens is None
 
     def test_creates_parent_dirs(self, small_data, tmp_path):
         from LLMRouter.router import RouterData
@@ -201,7 +232,7 @@ class TestOracleRouter:
         r = OracleRouter()
         r.fit(small_data)
         keys = set(r.evaluate(small_data).keys())
-        assert keys == {"mu", "vb", "ep", "avg_tokens", "avg_latency"}
+        assert keys == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency", "cost"}
 
 
 # ── RandomRouter ─────────────────────────────────────────────────────────────
@@ -238,7 +269,7 @@ class TestRandomRouter:
         rnd = RandomRouter(seed=0)
         rnd.fit(small_data)
         keys = set(rnd.evaluate(small_data).keys())
-        assert keys == {"mu", "vb", "ep", "avg_tokens", "avg_latency"}
+        assert keys == {"mu", "vb", "ep", "hr", "avg_tokens", "avg_latency", "cost"}
 
     def test_not_fitted_raises(self):
         from LLMRouter.router import RandomRouter
@@ -450,3 +481,25 @@ class TestRouterImports:
     def test_grpo_importable(self):
         from LLMRouter.router import GRPORouter
         assert GRPORouter is not None
+
+
+# ── SFTGRPORouter cost penalty（不需 GPU）───────────────────────────────────
+
+
+class TestSFTGRPOCostPenalty:
+    def test_penalty_uses_avg_tokens_times_price(self, small_data):
+        from LLMRouter.router.sft_grpo import SFTGRPORouter
+
+        small_data.train_tokens = np.tile([100.0, 400.0, 100.0], (len(small_data.train_prompt), 1))
+        avg = SFTGRPORouter._train_avg_tokens(small_data)
+        price = np.array([0.6, 0.3, 0.1])
+        pen = SFTGRPORouter()._cost_penalty_vector(price * avg)
+        # Cost_real = [60, 120, 10] → max normalize
+        assert np.allclose(pen, [0.5, 1.0, 10 / 120])
+
+    def test_no_train_tokens_returns_none(self, small_data):
+        from LLMRouter.router.sft_grpo import SFTGRPORouter
+
+        assert SFTGRPORouter._train_avg_tokens(small_data) is None
+        small_data.train_tokens = np.zeros((len(small_data.train_prompt), 3))
+        assert SFTGRPORouter._train_avg_tokens(small_data) is None

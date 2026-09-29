@@ -237,3 +237,17 @@ class LLMJudgeAnnotator(BaseAnnotator):
             except Exception as exc:
                 print(f"[error] {key}: {exc}")
                 return None
+
+
+from .registry import register
+
+
+def _llm_factory(args, config):
+    from litellm import Router as LiteLLMRouter
+    if not getattr(args, "judge", None):
+        raise ValueError("--strategy llm 需要指定 --judge <model_name>")
+    router = LiteLLMRouter(model_list=config["model_list"])
+    return LLMJudgeAnnotator(router=router, judge=args.judge)
+
+
+register("llm", _llm_factory)
