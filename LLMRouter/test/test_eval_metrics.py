@@ -459,3 +459,30 @@ class TestOracleRandomCost:
         oracle, rand = bench.results()
         assert np.isclose(oracle.cost, 300.0 * 2.0)                 # 永遠選 m1
         assert np.isclose(rand.cost, (100.0 * 1.0 + 300.0 * 2.0) / 2)  # 均勻期望
+
+
+# ── RouterBenchmark.run(save_dir=...) ────────────────────────────────────────
+
+class TestBenchmarkAutoSave:
+    def test_saves_each_run_and_reloads(self, tmp_path):
+        data = _make_data(n=30, m=2)
+        bench = RouterBenchmark(data)
+        bench.run(RandomRouter, label="random", sizes=[0.5, 1.0], seeds=[0, 1], save_dir=tmp_path)
+        paths = [r.saved_path for r in bench.results()]
+        assert len(paths) == 4 and len(set(paths)) == 4
+        for p in paths:
+            assert RandomRouter.load(p).model_names == data.models
+
+    def test_no_save_dir_saves_nothing(self, tmp_path):
+        bench = RouterBenchmark(_make_data(n=20, m=2))
+        bench.run(OracleRouter, label="oracle")
+        assert bench.results()[0].saved_path is None
+
+    def test_save_failure_does_not_abort(self, tmp_path, capsys):
+        class Broken(OracleRouter):
+            def save(self, path):
+                raise OSError("disk full")
+        bench = RouterBenchmark(_make_data(n=20, m=2))
+        bench.run(Broken, label="broken", save_dir=tmp_path)
+        assert bench.results()[0].saved_path is None
+        assert "儲存失敗" in capsys.readouterr().err

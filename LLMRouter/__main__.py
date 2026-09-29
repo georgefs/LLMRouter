@@ -448,6 +448,14 @@ def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
         sizes = [float(f) for f in args.fractions.split(",") if f.strip()]
 
     mc = _cost_multipliers(list(data.models))
+    save_dir = None
+    if not args.no_save:
+        if args.save_dir:
+            save_dir = Path(args.save_dir)
+        else:
+            import datetime
+            base = Path(args.data).parent if args.data else Path.cwd()
+            save_dir = base / "bench_routers" / datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     bench = RouterBenchmark(data)
     if not args.no_single_models:
         bench.add_single_models(model_costs=mc)
@@ -474,7 +482,8 @@ def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
             ))
         else:
             cls, kwargs = _router_cls_kwargs(spec, args)
-            bench.run(cls, kwargs, sizes=sizes, seeds=seeds, label=spec, model_costs=mc)
+            bench.run(cls, kwargs, sizes=sizes, seeds=seeds, label=spec, model_costs=mc,
+                      save_dir=save_dir)
 
     if args.show_cost:
         for r in bench._results:
@@ -498,6 +507,11 @@ def cmd_router_bench(mgr: "DatasetManager", args: argparse.Namespace) -> None:
         f"  |  repeats={args.repeats}"
     )
     bench.print_table(show_cost_metrics=args.show_cost)
+    saved = [r for r in bench.results() if r.saved_path]
+    if saved:
+        print(f"\n已儲存 {len(saved)} 個 router → {save_dir}")
+        for r in saved:
+            print(f"  {r.label:<22} {r.saved_path}")
     if args.show_cost and baseline is not None:
         print(f"TER / NBS 基準：{baseline.label}（HR={baseline.hr:.4f}, Cost={baseline.cost:.2f}）")
         print("Cost 單位：" + ("avg(tokens × 單價)，即每 1M 次查詢的 $" if mc is not None else "平均 token 數"))
@@ -795,6 +809,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_rt_bench.add_argument(
         "--show-cost", action="store_true",
         help="以 §4.3 格式顯示 HR/Cost/TER/NBS；TER/NBS 以 HR 最高的單一模型為基準",
+    )
+    p_rt_bench.add_argument(
+        "--save-dir", dest="save_dir", default=None,
+        help="訓練完的 router 儲存目錄（預設 <data.npz 所在目錄>/bench_routers/<時間戳>/）",
+    )
+    p_rt_bench.add_argument(
+        "--no-save", dest="no_save", action="store_true",
+        help="不儲存 bench 中訓練的 router",
     )
     p_rt_bench.add_argument(
         "--no-single-models", dest="no_single_models", action="store_true",

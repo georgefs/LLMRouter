@@ -48,3 +48,6 @@ Thumbs.db
 # Misc scratch
 t.sh
 *.log
+
+# router bench 自動儲存的 routers（含 sft_grpo adapter / tokenizer）
+bench_routers/

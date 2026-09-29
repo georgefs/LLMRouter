@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
@@ -288,6 +289,21 @@ def evaluate_full(
     return base
 
 
+def _save_router(router, save_dir, label: str, n_train: int, seed: int) -> Optional[str]:
+    """把 router 存到 save_dir；失敗時印警告並回傳 None。"""
+    import re
+    import sys
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", label)
+    path = Path(save_dir) / f"{safe}_n{n_train}_seed{seed}.pkl"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        router.save(path)
+        return str(path)
+    except Exception as exc:  # noqa: BLE001 — 儲存失敗不應中斷 benchmark
+        print(f"[bench] 警告：{label} 儲存失敗（{exc}）", file=sys.stderr)
+        return None
+
+
 def _has_own_evaluate(router) -> bool:
     """router 是否覆寫了 BaseRouter.evaluate（OracleRouter / RandomRouter）。"""
     from .base import BaseRouter
@@ -316,6 +332,7 @@ class RunResult:
     nbs:         Optional[float] = None  # §4.3 NBS
     single_model: bool          = False  # True = 永遠路由到同一模型的 baseline
     model:       Optional[str]  = None   # single_model 時為該模型名稱
+    saved_path:  Optional[str]  = None   # run(save_dir=...) 自動儲存的 router 路徑
 
 
 # ── RouterBenchmark ───────────────────────────────────────────────────────────
@@ -366,6 +383,7 @@ class RouterBenchmark:
         model_costs: "Optional[Union[List[float], np.ndarray]]" = None,
         baseline_hr: Optional[float] = None,
         baseline_cost: Optional[float] = None,
+        save_dir: "Optional[Union[str, Path]]" = None,
     ) -> "RouterBenchmark":
         """
         以指定配置訓練並評估 router，結果累積到 self._results。
@@ -381,6 +399,9 @@ class RouterBenchmark:
             model_costs:   M-length cost multiplier；傳入則同時計算 Cost
             baseline_hr:   最強基準 HR；與 baseline_cost 同時提供時計算 TER / NBS
             baseline_cost: 最強基準 Cost
+            save_dir:      指定時，每個訓練完的 router 存成
+                           <save_dir>/<label>_n<n_train>_seed<seed>.pkl；
+                           儲存失敗只警告，不中斷 benchmark
 
         Returns:
             self（支援 method chaining）
@@ -421,11 +442,14 @@ class RouterBenchmark:
                         baseline_cost=baseline_cost,
                     )
 
+                saved_path = _save_router(r, save_dir, label, n_train, seed) if save_dir else None
+
                 self._results.append(RunResult(
                     label=label,
                     size=size,
                     seed=seed,
                     n_train=n_train,
+                    saved_path=saved_path,
                     mu=metrics["mu"],
                     vb=metrics["vb"],
                     ep=metrics["ep"],
